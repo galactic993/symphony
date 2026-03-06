@@ -1,9 +1,9 @@
-.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer
+.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer linear-key run-symphony
 
 MIX ?= mix
 
 help:
-	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci"
+	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci, linear-key, run-symphony"
 
 setup:
 	$(MIX) setup
@@ -40,5 +40,11 @@ ci:
 	$(MAKE) lint
 	$(MAKE) coverage
 	$(MAKE) dialyzer
+
+linear-key:
+	./scripts/set-linear-api-key.sh
+
+run-symphony:
+	./scripts/run-symphony.sh
 
 all: ci

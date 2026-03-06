@@ -65,6 +65,18 @@ mise exec -- mix build
 mise exec -- ./bin/symphony ./WORKFLOW.md
 ```
 
+### Run with `dotenvx` and no `.env` file
+
+Store `LINEAR_API_KEY` in macOS Keychain once, then start Symphony through `dotenvx`:
+
+```bash
+cd symphony/elixir
+make linear-key
+make run-symphony
+```
+
+This flow does not create a `.env` file in the repository.
+
 ## Configuration
 
 Pass a custom workflow file path to `./bin/symphony` when starting the service:
