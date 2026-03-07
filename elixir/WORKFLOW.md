@@ -2,6 +2,38 @@
 tracker:
   kind: linear
   project_slug: "symphony-4d878387ede9"
+  dirRoot: ~/symphony-workspaces
+  projects:
+    - slug: "symphony-4d878387ede9"
+      dir: "symphony"
+    - slug: "d2dd244bd05e"
+      dir: "/Users/izutanikazuki/symphony-workspaces/genkoujar"
+    - slug: "746fb88ece9b"
+      dir: "/Users/izutanikazuki/symphony-workspaces/jbci-realtime"
+    - slug: "2d56b920afcc"
+      dir: "/Users/izutanikazuki/symphony-workspaces/jbci-pdca"
+    - slug: "bec632afbc7e"
+      dir: "/Users/izutanikazuki/symphony-workspaces/aqua"
+    - slug: "2d29ce44c1e8"
+      dir: "/Users/izutanikazuki/symphony-workspaces/amazon-sales-manager"
+    - slug: "de5f687203b7"
+      dir: "/Users/izutanikazuki/symphony-workspaces/gradation-community"
+    - slug: "76ed9381b98b"
+      dir: "/Users/izutanikazuki/symphony-workspaces/KANUSHii"
+    - slug: "4a14708facd1"
+      dir: "/Users/izutanikazuki/symphony-workspaces/kuripura"
+    - slug: "920720019b34"
+      dir: "/Users/izutanikazuki/symphony-workspaces/mezame-ai-official-site"
+    - slug: "0549605b77d8"
+      dir: "/Users/izutanikazuki/symphony-workspaces/roblox"
+    - slug: "7ce38d886089"
+      dir: "/Users/izutanikazuki/symphony-workspaces/shota-official"
+    - slug: "f32cc63c2318"
+      dir: "/Users/izutanikazuki/symphony-workspaces/workshop/seiko"
+    - slug: "d213cb90fd53"
+      dir: "/Users/izutanikazuki/symphony-workspaces/ai-community"
+    - slug: "d0641848a5df"
+      dir: "/Users/izutanikazuki/symphony-workspaces/workshop/hts"
   active_states:
     - Todo
     - In Progress
@@ -16,7 +48,7 @@ tracker:
 polling:
   interval_ms: 5000
 workspace:
-  root: ~/code/symphony-workspaces
+  root: ~/symphony-workspaces
 hooks:
   after_create: |
     git clone --depth 1 https://github.com/openai/symphony .
@@ -26,7 +58,7 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  max_concurrent_agents: 10
+  max_concurrent_agents: 30
   max_turns: 20
 codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
@@ -34,7 +66,9 @@ codex:
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
-port: 5923
+server:
+  port: 5923
+  enabled: true
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

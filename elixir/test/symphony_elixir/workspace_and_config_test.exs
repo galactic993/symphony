@@ -799,6 +799,96 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.codex_command() == "codex app-server"
   end
 
+  test "config supports monitoring multiple linear projects without explicit dir mapping" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_projects: [%{slug: "proj-a"}, %{slug: "proj-b"}]
+    )
+
+    assert Config.linear_project_slug() == "proj-a"
+    assert Config.linear_project_slugs() == ["proj-a", "proj-b"]
+    assert :ok = Config.validate!()
+  end
+
+  test "config resolves tracker dirRoot and relative project dir mappings" do
+    suffix = "symphony-test-#{System.unique_integer([:positive])}"
+    dir_root = Path.join(System.tmp_dir!(), suffix)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_dir_root: dir_root,
+      tracker_projects: [%{slug: "proj-a", dir: "project-a"}, %{slug: "proj-b", dir: "project-b/app"}]
+    )
+
+    assert Config.project_workspace_root() == Path.expand(dir_root)
+    assert Config.linear_project_dir("proj-a") == Path.expand(Path.join(dir_root, "project-a"))
+    assert Config.linear_project_dir("proj-b") == Path.expand(Path.join(dir_root, "project-b/app"))
+    assert Config.linear_project_slugs() == ["proj-a", "proj-b"]
+    assert :ok = Config.validate!()
+  end
+
+  test "workspace derives project dir from project name without escaping slashes" do
+    suffix = "symphony-test-#{System.unique_integer([:positive])}"
+    project_name = "#{suffix}/sirius/a"
+    project_root = Path.join(Config.project_workspace_root(), suffix)
+    expected_workspace = Path.join(Config.project_workspace_root(), project_name)
+    marker_path = Path.join(expected_workspace, "README.md")
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_project_slug: nil,
+        tracker_projects: [%{slug: "proj-a"}],
+        hook_after_create: "exit 17"
+      )
+
+      issue = %Issue{
+        id: "issue-proj-dir",
+        identifier: "MT-PROJ-1",
+        project_slug: "proj-a",
+        project_name: project_name
+      }
+
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+      assert workspace == Path.expand(expected_workspace)
+
+      File.write!(marker_path, "project marker\n")
+      assert File.read!(marker_path) == "project marker\n"
+      assert :ok = Workspace.remove_issue_workspaces(issue)
+      assert File.exists?(marker_path)
+    after
+      File.rm_rf(project_root)
+    end
+  end
+
+  test "workspace prefers slug-mapped project dir over project-name-derived dir" do
+    suffix = "symphony-test-#{System.unique_integer([:positive])}"
+    dir_root = Path.join(System.tmp_dir!(), suffix)
+    mapped_relative_dir = "project-b/app"
+    mapped_workspace = Path.join(dir_root, mapped_relative_dir)
+    project_name = "#{suffix}/ignored/by-mapping"
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_project_slug: nil,
+        tracker_dir_root: dir_root,
+        tracker_projects: [%{slug: "proj-b", dir: mapped_relative_dir}],
+        hook_after_create: "exit 17"
+      )
+
+      issue = %Issue{
+        id: "issue-proj-dir-mapped",
+        identifier: "MT-PROJ-2",
+        project_slug: "proj-b",
+        project_name: project_name
+      }
+
+      assert {:ok, workspace} = Workspace.create_for_issue(issue)
+      assert workspace == Path.expand(mapped_workspace)
+    after
+      File.rm_rf(dir_root)
+    end
+  end
+
   test "config resolves $VAR references for env-backed secret and path values" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"

@@ -144,12 +144,21 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp validate_workspace_cwd(workspace) when is_binary(workspace) do
     workspace_path = Path.expand(workspace)
     workspace_root = Path.expand(Config.workspace_root())
+    project_workspace_root = Path.expand(Config.project_workspace_root())
 
     root_prefix = workspace_root <> "/"
+    project_root_prefix = project_workspace_root <> "/"
+    project_dirs = Config.linear_project_dirs()
 
     cond do
       workspace_path == workspace_root ->
         {:error, {:invalid_workspace_cwd, :workspace_root, workspace_path}}
+
+      String.starts_with?(workspace_path <> "/", project_root_prefix) ->
+        :ok
+
+      workspace_in_project_dir?(workspace_path, project_dirs) ->
+        :ok
 
       not String.starts_with?(workspace_path <> "/", root_prefix) ->
         {:error, {:invalid_workspace_cwd, :outside_workspace_root, workspace_path, workspace_root}}
@@ -157,6 +166,13 @@ defmodule SymphonyElixir.Codex.AppServer do
       true ->
         :ok
     end
+  end
+
+  defp workspace_in_project_dir?(workspace_path, project_dirs)
+       when is_binary(workspace_path) and is_list(project_dirs) do
+    Enum.any?(project_dirs, fn project_dir ->
+      is_binary(project_dir) and Path.expand(project_dir) == workspace_path
+    end)
   end
 
   defp start_port(workspace) do

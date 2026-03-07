@@ -969,7 +969,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     refute rendered =~ "Timestamp:"
   end
 
-  test "status dashboard renders linear project link in header" do
+  test "status dashboard omits project links in header" do
     snapshot_data =
       {:ok,
        %{
@@ -981,7 +981,35 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
 
-    assert rendered =~ "https://linear.app/project/project/issues"
+    refute rendered =~ "│ Project:"
+    refute rendered =~ "│ Projects:"
+    refute rendered =~ "https://linear.app/project/"
+    refute rendered =~ "Dashboard:"
+  end
+
+  test "status dashboard omits project links even when multiple projects are configured" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: nil,
+      tracker_projects: [
+        %{slug: "proj-a"},
+        %{slug: "proj-b"}
+      ]
+    )
+
+    snapshot_data =
+      {:ok,
+       %{
+         running: [],
+         retrying: [],
+         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+         rate_limits: nil
+       }}
+
+    rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
+
+    refute rendered =~ "│ Project:"
+    refute rendered =~ "│ Projects:"
+    refute rendered =~ "https://linear.app/project/"
     refute rendered =~ "Dashboard:"
   end
 
@@ -1009,8 +1037,6 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     rendered = StatusDashboard.format_snapshot_content_for_test(snapshot_data, 0.0)
 
-    assert rendered =~ "│ Project:"
-    assert rendered =~ "https://linear.app/project/project/issues"
     assert rendered =~ "│ Dashboard:"
     assert rendered =~ "http://127.0.0.1:4000/"
   end

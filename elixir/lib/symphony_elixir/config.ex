@@ -24,6 +24,7 @@ defmodule SymphonyElixir.Config do
   """
   @default_poll_interval_ms 30_000
   @default_workspace_root Path.join(System.tmp_dir!(), "symphony_workspaces")
+  @default_project_workspace_root Path.expand("~/symphony-workspace")
   @default_hook_timeout_ms 60_000
   @default_max_concurrent_agents 10
   @default_agent_max_turns 20
@@ -52,7 +53,9 @@ defmodule SymphonyElixir.Config do
                                  kind: [type: {:or, [:string, nil]}, default: nil],
                                  endpoint: [type: :string, default: @default_linear_endpoint],
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
+                                 dir_root: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
+                                 projects: [type: {:list, :map}, default: []],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
                                  active_states: [
                                    type: {:list, :string},
@@ -160,6 +163,7 @@ defmodule SymphonyElixir.Config do
 
   @type workflow_payload :: Workflow.loaded_workflow()
   @type tracker_kind :: String.t() | nil
+  @type linear_project :: %{slug: String.t(), dir: Path.t() | nil}
   @type codex_runtime_settings :: %{
           approval_policy: String.t() | map(),
           thread_sandbox: String.t(),
@@ -198,7 +202,53 @@ defmodule SymphonyElixir.Config do
 
   @spec linear_project_slug() :: String.t() | nil
   def linear_project_slug do
-    get_in(validated_workflow_options(), [:tracker, :project_slug])
+    case linear_projects() do
+      [%{slug: project_slug} | _rest] -> project_slug
+      [] -> nil
+    end
+  end
+
+  @spec linear_project_slugs() :: [String.t()]
+  def linear_project_slugs do
+    Enum.map(linear_projects(), & &1.slug)
+  end
+
+  @spec linear_project_dir(String.t() | nil) :: Path.t() | nil
+  def linear_project_dir(project_slug) when is_binary(project_slug) do
+    normalized_project_slug = normalize_linear_project_slug(project_slug)
+
+    Enum.find_value(linear_projects(), fn %{slug: slug, dir: dir} ->
+      if slug == normalized_project_slug, do: dir
+    end)
+  end
+
+  def linear_project_dir(_project_slug), do: nil
+
+  @spec linear_project_dirs() :: [Path.t()]
+  def linear_project_dirs do
+    linear_projects()
+    |> Enum.map(& &1.dir)
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.map(&Path.expand/1)
+    |> Enum.uniq()
+  end
+
+  @spec linear_projects() :: [linear_project()]
+  def linear_projects do
+    tracker = get_in(validated_workflow_options(), [:tracker])
+    project_dir_root = tracker |> Map.get(:dir_root) |> normalize_linear_project_dir_root()
+    configured_projects = tracker |> Map.get(:projects, []) |> normalize_linear_projects(project_dir_root)
+
+    case configured_projects do
+      [] ->
+        case Map.get(tracker, :project_slug) |> normalize_linear_project_slug() do
+          nil -> []
+          project_slug -> [%{slug: project_slug, dir: nil}]
+        end
+
+      projects ->
+        projects
+    end
   end
 
   @spec linear_assignee() :: String.t() | nil
@@ -230,6 +280,36 @@ defmodule SymphonyElixir.Config do
     |> get_in([:workspace, :root])
     |> resolve_path_value(@default_workspace_root)
   end
+
+  @spec project_workspace_root() :: Path.t()
+  def project_workspace_root do
+    validated_workflow_options()
+    |> get_in([:tracker, :dir_root])
+    |> resolve_path_value(@default_project_workspace_root)
+    |> Path.expand()
+  end
+
+  @spec project_workspace_dir(String.t() | nil) :: Path.t() | nil
+  def project_workspace_dir(project_name) when is_binary(project_name) do
+    project_path_segments =
+      project_name
+      |> String.split("/", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    cond do
+      project_path_segments == [] ->
+        nil
+
+      Enum.any?(project_path_segments, &(&1 in [".", ".."])) ->
+        nil
+
+      true ->
+        Path.join([project_workspace_root() | project_path_segments])
+    end
+  end
+
+  def project_workspace_dir(_project_name), do: nil
 
   @spec workspace_hooks() :: workspace_hooks()
   def workspace_hooks do
@@ -412,7 +492,7 @@ defmodule SymphonyElixir.Config do
   defp require_linear_project do
     case tracker_kind() do
       "linear" ->
-        if is_binary(linear_project_slug()) do
+        if linear_project_slugs() != [] do
           :ok
         else
           {:error, :missing_linear_project_slug}
@@ -462,7 +542,10 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:kind, normalize_tracker_kind(scalar_string_value(Map.get(section, "kind"))))
     |> put_if_present(:endpoint, scalar_string_value(Map.get(section, "endpoint")))
     |> put_if_present(:api_key, binary_value(Map.get(section, "api_key"), allow_empty: true))
+    |> put_if_present(:dir_root, tracker_dir_root_value(section))
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
+    |> put_if_present(:projects, tracker_projects_value(Map.get(section, "projects")))
+    |> put_if_present(:assignee, scalar_string_value(Map.get(section, "assignee")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
   end
@@ -590,6 +673,25 @@ defmodule SymphonyElixir.Config do
   end
 
   defp csv_value(_value), do: :omit
+
+  defp tracker_projects_value(values) when is_list(values) do
+    values
+    |> normalize_linear_projects(nil)
+    |> case do
+      [] -> :omit
+      projects -> projects
+    end
+  end
+
+  defp tracker_projects_value(_values), do: :omit
+
+  defp tracker_dir_root_value(section) when is_map(section) do
+    section
+    |> Map.get("dir_root", Map.get(section, "dirRoot"))
+    |> binary_value()
+  end
+
+  defp tracker_dir_root_value(_section), do: :omit
 
   defp maybe_append_csv_value(acc, value) do
     case scalar_string_value(value) do
@@ -772,6 +874,100 @@ defmodule SymphonyElixir.Config do
       "excludeTmpdirEnvVar" => false,
       "excludeSlashTmp" => false
     }
+  end
+
+  defp normalize_linear_projects(projects, dir_root) when is_list(projects) do
+    projects
+    |> Enum.reduce([], fn project, acc ->
+      case normalize_linear_project(project, dir_root) do
+        nil -> acc
+        normalized_project -> [normalized_project | acc]
+      end
+    end)
+    |> Enum.reverse()
+    |> dedupe_linear_projects_by_slug()
+  end
+
+  defp normalize_linear_projects(_projects, _dir_root), do: []
+
+  defp normalize_linear_project(%{} = project, dir_root) do
+    project_slug = project |> Map.get(:slug, Map.get(project, "slug")) |> normalize_linear_project_slug()
+
+    if is_binary(project_slug) do
+      %{
+        slug: project_slug,
+        dir: project |> Map.get(:dir, Map.get(project, "dir")) |> normalize_linear_project_dir(dir_root)
+      }
+    else
+      nil
+    end
+  end
+
+  defp normalize_linear_project(_project, _dir_root), do: nil
+
+  defp normalize_linear_project_slug(project_slug) when is_binary(project_slug) do
+    case String.trim(project_slug) do
+      "" -> nil
+      normalized_project_slug -> normalized_project_slug
+    end
+  end
+
+  defp normalize_linear_project_slug(_project_slug), do: nil
+
+  defp normalize_linear_project_dir(project_dir, dir_root) do
+    case binary_value(project_dir) do
+      :omit ->
+        nil
+
+      path ->
+        case normalize_path_token(path) do
+          :missing ->
+            nil
+
+          normalized_path ->
+            trimmed_path = String.trim(normalized_path)
+
+            cond do
+              trimmed_path == "" ->
+                nil
+
+              uri_path?(trimmed_path) ->
+                trimmed_path
+
+              Path.type(trimmed_path) == :relative and is_binary(dir_root) and String.trim(dir_root) != "" ->
+                Path.expand(trimmed_path, dir_root)
+
+              true ->
+                Path.expand(trimmed_path)
+            end
+        end
+    end
+  end
+
+  defp normalize_linear_project_dir_root(project_dir_root) do
+    case binary_value(project_dir_root) do
+      :omit ->
+        nil
+
+      path ->
+        case resolve_path_value(path, nil) do
+          nil -> nil
+          resolved -> Path.expand(resolved)
+        end
+    end
+  end
+
+  defp dedupe_linear_projects_by_slug(projects) when is_list(projects) do
+    projects
+    |> Enum.reduce({[], MapSet.new()}, fn %{slug: slug} = project, {acc, seen_slugs} ->
+      if MapSet.member?(seen_slugs, slug) do
+        {acc, seen_slugs}
+      else
+        {[project | acc], MapSet.put(seen_slugs, slug)}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
   end
 
   defp normalize_issue_state(state_name) when is_binary(state_name) do

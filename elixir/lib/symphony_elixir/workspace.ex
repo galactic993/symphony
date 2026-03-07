@@ -13,12 +13,10 @@ defmodule SymphonyElixir.Workspace do
     issue_context = issue_context(issue_or_identifier)
 
     try do
-      safe_id = safe_identifier(issue_context.issue_identifier)
+      workspace = workspace_path_for_issue(issue_context)
 
-      workspace = workspace_path_for_issue(safe_id)
-
-      with :ok <- validate_workspace_path(workspace),
-           {:ok, created?} <- ensure_workspace(workspace),
+      with :ok <- validate_workspace_path(workspace, issue_context),
+           {:ok, created?} <- ensure_workspace(workspace, issue_context),
            :ok <- maybe_run_after_create_hook(workspace, issue_context, created?) do
         {:ok, workspace}
       end
@@ -29,7 +27,15 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp ensure_workspace(workspace) do
+  defp ensure_workspace(workspace, issue_context) do
+    if project_bound_workspace?(issue_context) do
+      ensure_project_workspace(workspace)
+    else
+      ensure_issue_workspace(workspace)
+    end
+  end
+
+  defp ensure_issue_workspace(workspace) do
     cond do
       File.dir?(workspace) ->
         clean_tmp_artifacts(workspace)
@@ -41,6 +47,23 @@ defmodule SymphonyElixir.Workspace do
 
       true ->
         create_workspace(workspace)
+    end
+  end
+
+  defp ensure_project_workspace(workspace) do
+    case File.stat(workspace) do
+      {:ok, %File.Stat{type: :directory}} ->
+        {:ok, false}
+
+      {:ok, %File.Stat{type: type}} ->
+        {:error, {:project_workspace_not_directory, workspace, type}}
+
+      {:error, :enoent} ->
+        File.mkdir_p!(workspace)
+        {:ok, true}
+
+      {:error, reason} ->
+        {:error, {:project_workspace_unreadable, workspace, reason}}
     end
   end
 
@@ -69,6 +92,19 @@ defmodule SymphonyElixir.Workspace do
   end
 
   @spec remove_issue_workspaces(term()) :: :ok
+  def remove_issue_workspaces(%{} = issue_or_identifier) do
+    case project_workspace_dir(issue_or_identifier) do
+      project_dir when is_binary(project_dir) and project_dir != "" ->
+        :ok
+
+      _ ->
+        issue_or_identifier
+        |> issue_context()
+        |> Map.get(:issue_identifier)
+        |> remove_issue_workspaces()
+    end
+  end
+
   def remove_issue_workspaces(identifier) when is_binary(identifier) do
     safe_id = safe_identifier(identifier)
     workspace = Path.join(Config.workspace_root(), safe_id)
@@ -108,7 +144,12 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp workspace_path_for_issue(safe_id) when is_binary(safe_id) do
+  defp workspace_path_for_issue(%{project_dir: project_dir}) when is_binary(project_dir) do
+    Path.expand(project_dir)
+  end
+
+  defp workspace_path_for_issue(%{issue_identifier: identifier}) do
+    safe_id = safe_identifier(identifier)
     Path.join(Config.workspace_root(), safe_id)
   end
 
@@ -123,8 +164,11 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?) do
-    case created? do
-      true ->
+    cond do
+      project_bound_workspace?(issue_context) ->
+        :ok
+
+      created? ->
         case Config.workspace_hooks()[:after_create] do
           nil ->
             :ok
@@ -133,7 +177,7 @@ defmodule SymphonyElixir.Workspace do
             run_hook(command, workspace, issue_context, "after_create")
         end
 
-      false ->
+      true ->
         :ok
     end
   end
@@ -210,6 +254,14 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
+  defp validate_workspace_path(workspace, issue_context) when is_binary(workspace) and is_map(issue_context) do
+    if project_bound_workspace?(issue_context) do
+      validate_project_workspace_path(workspace)
+    else
+      validate_workspace_path(workspace)
+    end
+  end
+
   defp validate_workspace_path(workspace) when is_binary(workspace) do
     expanded_workspace = Path.expand(workspace)
     root = Path.expand(Config.workspace_root())
@@ -224,6 +276,32 @@ defmodule SymphonyElixir.Workspace do
 
       true ->
         {:error, {:workspace_outside_root, expanded_workspace, root}}
+    end
+  end
+
+  defp validate_project_workspace_path(workspace) when is_binary(workspace) do
+    expanded_workspace = Path.expand(workspace)
+    project_workspace_root = Path.expand(Config.project_workspace_root())
+    project_root_prefix = project_workspace_root <> "/"
+
+    cond do
+      not String.starts_with?(expanded_workspace <> "/", project_root_prefix) ->
+        {:error, {:project_workspace_outside_root, expanded_workspace, project_workspace_root}}
+
+      true ->
+        case File.stat(expanded_workspace) do
+          {:ok, %File.Stat{type: :directory}} ->
+            :ok
+
+          {:ok, %File.Stat{type: type}} ->
+            {:error, {:project_workspace_not_directory, expanded_workspace, type}}
+
+          {:error, :enoent} ->
+            :ok
+
+          {:error, reason} ->
+            {:error, {:project_workspace_unreadable, expanded_workspace, reason}}
+        end
     end
   end
 
@@ -255,28 +333,137 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  defp issue_context(%{id: issue_id, identifier: identifier}) do
+  defp issue_context(%{} = issue) do
+    project_slug = issue_project_slug(issue)
+    project_name = issue_project_name(issue)
+
     %{
-      issue_id: issue_id,
-      issue_identifier: identifier || "issue"
+      issue_id: issue_field(issue, :id),
+      issue_identifier: issue_field(issue, :identifier) || "issue",
+      project_slug: project_slug,
+      project_name: project_name,
+      project_dir: issue_project_dir(issue)
     }
   end
 
   defp issue_context(identifier) when is_binary(identifier) do
     %{
       issue_id: nil,
-      issue_identifier: identifier
+      issue_identifier: identifier,
+      project_slug: nil,
+      project_name: nil,
+      project_dir: nil
     }
   end
 
   defp issue_context(_identifier) do
     %{
       issue_id: nil,
-      issue_identifier: "issue"
+      issue_identifier: "issue",
+      project_slug: nil,
+      project_name: nil,
+      project_dir: nil
     }
   end
 
-  defp issue_log_context(%{issue_id: issue_id, issue_identifier: issue_identifier}) do
-    "issue_id=#{issue_id || "n/a"} issue_identifier=#{issue_identifier || "issue"}"
+  defp issue_field(issue, key) when is_map(issue) and is_atom(key) do
+    Map.get(issue, key) || Map.get(issue, Atom.to_string(key))
+  end
+
+  defp issue_project_slug(issue) do
+    issue
+    |> issue_field(:project_slug)
+    |> normalize_project_slug()
+  end
+
+  defp issue_project_name(issue) do
+    issue
+    |> issue_field(:project_name)
+    |> normalize_project_name()
+  end
+
+  defp issue_project_dir(issue) do
+    issue
+    |> issue_field(:project_dir)
+    |> normalize_project_dir()
+    |> case do
+      nil ->
+        slug_mapped_dir =
+          issue
+          |> issue_project_slug()
+          |> Config.linear_project_dir()
+
+        case slug_mapped_dir do
+          project_dir when is_binary(project_dir) ->
+            project_dir
+
+          _ ->
+            issue
+            |> issue_project_name()
+            |> Config.project_workspace_dir()
+        end
+
+      project_dir ->
+        project_dir
+    end
+  end
+
+  defp normalize_project_slug(project_slug) when is_binary(project_slug) do
+    case String.trim(project_slug) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_project_slug(_project_slug), do: nil
+
+  defp normalize_project_name(project_name) when is_binary(project_name) do
+    case String.trim(project_name) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_project_name(_project_name), do: nil
+
+  defp normalize_project_dir(project_dir) when is_binary(project_dir) do
+    case String.trim(project_dir) do
+      "" -> nil
+      normalized -> Path.expand(normalized)
+    end
+  end
+
+  defp normalize_project_dir(_project_dir), do: nil
+
+  defp project_workspace_dir(issue_or_identifier) when is_map(issue_or_identifier) do
+    issue_or_identifier
+    |> issue_context()
+    |> Map.get(:project_dir)
+  end
+
+  defp project_workspace_dir(_issue_or_identifier), do: nil
+
+  defp project_bound_workspace?(%{project_dir: project_dir}) when is_binary(project_dir) do
+    String.trim(project_dir) != ""
+  end
+
+  defp project_bound_workspace?(_issue_context), do: false
+
+  defp issue_log_context(%{issue_id: issue_id, issue_identifier: issue_identifier} = issue_context) do
+    project_slug = Map.get(issue_context, :project_slug)
+    project_name = Map.get(issue_context, :project_name)
+
+    project_context =
+      [
+        if(is_binary(project_slug) and project_slug != "", do: "project_slug=#{project_slug}"),
+        if(is_binary(project_name) and project_name != "", do: "project_name=#{project_name}")
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> case do
+        [] -> ""
+        values -> " " <> Enum.join(values, " ")
+      end
+
+    "issue_id=#{issue_id || "n/a"} issue_identifier=#{issue_identifier || "issue"}#{project_context}"
   end
 end

@@ -119,9 +119,64 @@ You are working on a Linear issue {{ issue.identifier }}.
 Title: {{ issue.title }} Body: {{ issue.description }}
 ```
 
+To monitor multiple Linear projects:
+
+```md
+---
+tracker:
+  kind: linear
+  dirRoot: ~/symphony-workspaces
+  projects:
+    - slug: "filemakertraining-d0641848a5df"
+      dir: fileMaker/training
+    - slug: "symphony-4d878387ede9"
+      dir: symphony
+---
+```
+
+`projects[].slug` should use the Linear project `slugId` (the ID suffix after the last `-`
+in the project URL slug, for example `.../project/<name>-<slugId>`).
+`add-project.sh connect` accepts either full project URL/full slug or plain `slugId`, and
+normalizes to `slugId`.
+
+If `projects[].dir` is set, Symphony uses that path for the project workspace. Relative
+paths are resolved from `tracker.dirRoot`. If `projects[].dir` is omitted, Symphony falls
+back to `<dirRoot>/<project_name>`.
+
+You can register or update one mapping from CLI:
+
+```bash
+cd elixir
+mise exec -- mix workflow.projects.add --slug d0641848a5df --dir fileMaker/training
+```
+
+Or use the helper script:
+
+```bash
+bash ~/symphony-workspaces/symphony/elixir/add-project.sh new /Users/izutanikazuki/symphony-workspaces/symphony "Project Name"
+bash ~/symphony-workspaces/symphony/elixir/add-project.sh connect . https://linear.app/mezame-ai/project/aqua-hp-99f897273ee0
+```
+
+`add-project.sh` commands:
+
+- `new <dir> <project-name>`: creates a new Linear project in team key `MEZ`, then registers mapping
+- `connect <dir> <linear-slug-or-url>`: registers mapping to an existing Linear project
+
+When using `add-project.sh`, relative `dir` values (such as `.`, `./foo`, `../bar`) are
+normalized and saved as absolute paths from the current working directory.
+
+`new` requires `LINEAR_API_KEY`, `curl`, and `jq`. Team key can be overridden with `LINEAR_TEAM_KEY`.
+If `LINEAR_API_KEY` is not exported, the script checks macOS Keychain using
+`SYMPHONY_LINEAR_KEYCHAIN_SERVICE` / `SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT` (same defaults as `make run-symphony`),
+and also attempts one `dotenvx run` re-exec that searches `.env*` in the current directory,
+script directory, and repo root.
+
 Notes:
 
 - If a value is missing, defaults are used.
+- `tracker.project_slug` (single project) and `tracker.projects` (multi-project) are both supported.
+  If `tracker.projects` is present, it is used for polling and workspace routing.
+- `tracker.dirRoot` (or `tracker.dir_root`) sets the root for project workspace routing.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
