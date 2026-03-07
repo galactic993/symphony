@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
+  @failure_state_name "Human Review"
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -114,14 +115,7 @@ defmodule SymphonyElixir.Orchestrator do
               })
 
             _ ->
-              Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
-
-              next_attempt = next_retry_attempt_from_running(running_entry)
-
-              schedule_issue_retry(state, issue_id, next_attempt, %{
-                identifier: running_entry.identifier,
-                error: "agent exited: #{inspect(reason)}"
-              })
+              handle_failed_agent_exit(state, issue_id, session_id, running_entry, reason)
           end
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -816,6 +810,33 @@ defmodule SymphonyElixir.Orchestrator do
            error: "no available orchestrator slots"
          })
        )}
+    end
+  end
+
+  defp handle_failed_agent_exit(state, issue_id, session_id, running_entry, reason) do
+    identifier = Map.get(running_entry, :identifier, issue_id)
+
+    case Tracker.update_issue_state(issue_id, @failure_state_name) do
+      :ok ->
+        Logger.warning(
+          "Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; " <>
+            "moved issue to state=#{@failure_state_name}"
+        )
+
+        release_issue_claim(state, issue_id)
+
+      {:error, update_reason} ->
+        Logger.warning(
+          "Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; " <>
+            "failed to move issue to state=#{@failure_state_name}: #{inspect(update_reason)}; scheduling retry"
+        )
+
+        next_attempt = next_retry_attempt_from_running(running_entry)
+
+        schedule_issue_retry(state, issue_id, next_attempt, %{
+          identifier: identifier,
+          error: "agent exited: #{inspect(reason)}"
+        })
     end
   end
 

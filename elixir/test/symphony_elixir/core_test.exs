@@ -1,6 +1,78 @@
 defmodule SymphonyElixir.CoreTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FakeLinearClient do
+    def fetch_candidate_issues, do: {:ok, []}
+    def fetch_issues_by_states(_states), do: {:ok, []}
+    def fetch_issue_states_by_ids(_issue_ids), do: {:ok, []}
+
+    def graphql(query, variables) do
+      case Application.get_env(:symphony_elixir, :core_test_linear_recipient) do
+        recipient when is_pid(recipient) ->
+          send(recipient, {:core_test_graphql_called, query, variables})
+
+        _ ->
+          :ok
+      end
+
+      case Application.get_env(:symphony_elixir, :core_test_linear_graphql_results, []) do
+        [result | rest] ->
+          Application.put_env(:symphony_elixir, :core_test_linear_graphql_results, rest)
+          result
+
+        _ ->
+          Application.get_env(:symphony_elixir, :core_test_linear_graphql_result, {:error, :no_result})
+      end
+    end
+  end
+
+  setup do
+    linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
+    core_test_linear_recipient = Application.get_env(:symphony_elixir, :core_test_linear_recipient)
+
+    core_test_linear_graphql_result =
+      Application.get_env(:symphony_elixir, :core_test_linear_graphql_result)
+
+    core_test_linear_graphql_results =
+      Application.get_env(:symphony_elixir, :core_test_linear_graphql_results)
+
+    on_exit(fn ->
+      if is_nil(linear_client_module) do
+        Application.delete_env(:symphony_elixir, :linear_client_module)
+      else
+        Application.put_env(:symphony_elixir, :linear_client_module, linear_client_module)
+      end
+
+      if is_nil(core_test_linear_recipient) do
+        Application.delete_env(:symphony_elixir, :core_test_linear_recipient)
+      else
+        Application.put_env(:symphony_elixir, :core_test_linear_recipient, core_test_linear_recipient)
+      end
+
+      if is_nil(core_test_linear_graphql_result) do
+        Application.delete_env(:symphony_elixir, :core_test_linear_graphql_result)
+      else
+        Application.put_env(
+          :symphony_elixir,
+          :core_test_linear_graphql_result,
+          core_test_linear_graphql_result
+        )
+      end
+
+      if is_nil(core_test_linear_graphql_results) do
+        Application.delete_env(:symphony_elixir, :core_test_linear_graphql_results)
+      else
+        Application.put_env(
+          :symphony_elixir,
+          :core_test_linear_graphql_results,
+          core_test_linear_graphql_results
+        )
+      end
+    end)
+
+    :ok
+  end
+
   test "config defaults and validation checks" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -459,10 +531,14 @@ defmodule SymphonyElixir.CoreTest do
     assert_due_in_range(due_at_ms, 500, 1_100)
   end
 
-  test "abnormal worker exit increments retry attempt progressively" do
+  test "abnormal worker exit moves issue to Human Review and skips retry" do
     issue_id = "issue-crash"
     ref = make_ref()
     orchestrator_name = Module.concat(__MODULE__, :CrashRetryOrchestrator)
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
 
     on_exit(fn ->
@@ -490,16 +566,25 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     send(pid, {:DOWN, ref, :process, self(), :boom})
+    assert_receive {:memory_tracker_state_update, ^issue_id, "Human Review"}
+
     Process.sleep(50)
     state = :sys.get_state(pid)
 
-    assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
-             state.retry_attempts[issue_id]
-
-    assert_due_in_range(due_at_ms, 39_500, 40_500)
+    refute Map.has_key?(state.retry_attempts, issue_id)
+    refute MapSet.member?(state.claimed, issue_id)
   end
 
-  test "first abnormal worker exit waits before retrying" do
+  test "abnormal worker exit retries when Human Review transition fails" do
+    Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+    Application.put_env(:symphony_elixir, :core_test_linear_recipient, self())
+
+    Application.put_env(
+      :symphony_elixir,
+      :core_test_linear_graphql_result,
+      {:ok, %{"data" => %{"issue" => %{"team" => %{"states" => %{"nodes" => []}}}}}}
+    )
+
     issue_id = "issue-crash-initial"
     ref = make_ref()
     orchestrator_name = Module.concat(__MODULE__, :InitialCrashRetryOrchestrator)
@@ -529,6 +614,9 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     send(pid, {:DOWN, ref, :process, self(), :boom})
+    assert_receive {:core_test_graphql_called, state_lookup_query, %{issueId: ^issue_id, stateName: "Human Review"}}
+    assert state_lookup_query =~ "SymphonyResolveStateId"
+
     Process.sleep(50)
     state = :sys.get_state(pid)
 
