@@ -34,6 +34,9 @@ help with the setup:
 > Set up Symphony for my repository based on
 > https://github.com/openai/symphony/blob/main/elixir/README.md
 
+For retry/backoff execution semantics in the Elixir runtime, see the FAQ entry
+"What happens when an issue enters the Backoff queue?" in [`elixir/README.md`](elixir/README.md).
+
 ---
 
 ## License

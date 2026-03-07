@@ -239,6 +239,24 @@ make all
 
 ## FAQ
 
+### What happens when an issue enters the Backoff queue?
+
+In the Elixir reference implementation, a Backoff retry starts a new Codex app-server thread/session
+for the issue, so conversation memory from the previous session is not preserved.
+
+At the same time, the issue workspace on disk is reused (it is not recreated from scratch if the
+directory already exists), so file changes in the workspace remain available for the retry.
+
+Retry prompts are rebuilt from current Linear issue data and include the issue description plus
+recent comments. In practice this means checklist/workpad progress can be re-read from Linear, but
+there are fetch limits:
+
+- comments are fetched with `first: 5`
+- each comment body is truncated to 2,000 characters
+
+If checklist state lives outside that fetched window, the agent may miss it unless it explicitly
+retrieves additional context from Linear during the run.
+
 ### Why Elixir?
 
 Elixir is built on Erlang/BEAM/OTP, which is great for supervising long-running processes. It has an
