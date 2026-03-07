@@ -283,6 +283,32 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         "id" => "user-1"
       },
       "labels" => %{"nodes" => [%{"name" => "Backend"}]},
+      "attachments" => %{
+        "nodes" => [
+          %{
+            "id" => "att-1",
+            "title" => "Reproduction video",
+            "url" => "https://uploads.linear.app/repro.mp4",
+            "sourceType" => "upload"
+          }
+        ]
+      },
+      "comments" => %{
+        "nodes" => [
+          %{
+            "id" => "comment-2",
+            "body" => "確認用画像: ![bug](https://uploads.linear.app/bug.png)",
+            "createdAt" => "2026-01-02T00:00:00Z",
+            "updatedAt" => "2026-01-02T00:00:00Z"
+          },
+          %{
+            "id" => "comment-1",
+            "body" => "ログ: https://uploads.linear.app/log.txt",
+            "createdAt" => "2026-01-01T00:00:00Z",
+            "updatedAt" => "2026-01-01T00:00:00Z"
+          }
+        ]
+      },
       "inverseRelations" => %{
         "nodes" => [
           %{
@@ -311,6 +337,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert issue.blocked_by == [%{id: "issue-2", identifier: "MT-2", state: "In Progress"}]
     assert issue.labels == ["backend"]
+    assert issue.attachments == [%{id: "att-1", title: "Reproduction video", url: "https://uploads.linear.app/repro.mp4", source_type: "upload"}]
+    assert Enum.map(issue.comments, & &1.id) == ["comment-1", "comment-2"]
+
+    assert Enum.map(issue.comments, & &1.body) == [
+             "ログ: https://uploads.linear.app/log.txt",
+             "確認用画像: ![bug](https://uploads.linear.app/bug.png)"
+           ]
+
     assert issue.priority == 2
     assert issue.state == "Todo"
     assert issue.assignee_id == "user-1"

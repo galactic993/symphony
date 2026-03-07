@@ -7,10 +7,12 @@ defmodule SymphonyElixir.Linear.Client do
   alias SymphonyElixir.{Config, Linear.Issue}
 
   @issue_page_size 50
+  @issue_comment_page_size 5
+  @max_comment_body_chars 2_000
   @max_error_body_log_bytes 1_000
 
   @query """
-  query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+  query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $after: String) {
     issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
       nodes {
         id
@@ -33,6 +35,22 @@ defmodule SymphonyElixir.Linear.Client do
         labels {
           nodes {
             name
+          }
+        }
+        attachments {
+          nodes {
+            id
+            title
+            url
+            sourceType
+          }
+        }
+        comments(first: $commentFirst) {
+          nodes {
+            id
+            body
+            createdAt
+            updatedAt
           }
         }
         inverseRelations(first: $relationFirst) {
@@ -59,7 +77,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_ids """
-  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
+  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
       nodes {
         id
@@ -82,6 +100,22 @@ defmodule SymphonyElixir.Linear.Client do
         labels {
           nodes {
             name
+          }
+        }
+        attachments {
+          nodes {
+            id
+            title
+            url
+            sourceType
+          }
+        }
+        comments(first: $commentFirst) {
+          nodes {
+            id
+            body
+            createdAt
+            updatedAt
           }
         }
         inverseRelations(first: $relationFirst) {
@@ -264,6 +298,7 @@ defmodule SymphonyElixir.Linear.Client do
              stateNames: state_names,
              first: @issue_page_size,
              relationFirst: @issue_page_size,
+             commentFirst: @issue_comment_page_size,
              after: after_cursor
            }),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter, project_slug) do
@@ -307,7 +342,8 @@ defmodule SymphonyElixir.Linear.Client do
     case graphql(@query_by_ids, %{
            ids: ids,
            first: Enum.min([length(ids), @issue_page_size]),
-           relationFirst: @issue_page_size
+           relationFirst: @issue_page_size,
+           commentFirst: @issue_comment_page_size
          }) do
       {:ok, body} ->
         decode_linear_response(body, assignee_filter)
@@ -474,6 +510,8 @@ defmodule SymphonyElixir.Linear.Client do
       project_dir: project_dir,
       assignee_id: assignee_field(assignee, "id"),
       blocked_by: extract_blockers(issue),
+      attachments: extract_attachments(issue),
+      comments: extract_comments(issue),
       labels: extract_labels(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
       created_at: parse_datetime(issue["createdAt"]),
@@ -591,6 +629,71 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp extract_labels(_), do: []
 
+  defp extract_attachments(%{"attachments" => %{"nodes" => attachments}})
+       when is_list(attachments) do
+    attachments
+    |> Enum.flat_map(fn
+      %{"url" => url} = attachment when is_binary(url) ->
+        trimmed_url = String.trim(url)
+
+        if trimmed_url == "" do
+          []
+        else
+          [
+            %{
+              id: attachment["id"],
+              title: normalize_text_field(attachment["title"]),
+              url: trimmed_url,
+              source_type: normalize_text_field(attachment["sourceType"])
+            }
+          ]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp extract_attachments(_), do: []
+
+  defp extract_comments(%{"comments" => %{"nodes" => comments}}) when is_list(comments) do
+    comments
+    |> Enum.flat_map(fn
+      %{"body" => body} = comment when is_binary(body) ->
+        normalized_body =
+          body
+          |> String.trim()
+          |> truncate_comment_body()
+
+        if normalized_body == "" do
+          []
+        else
+          [
+            %{
+              id: comment["id"],
+              body: normalized_body,
+              created_at: parse_datetime(comment["createdAt"]),
+              updated_at: parse_datetime(comment["updatedAt"])
+            }
+          ]
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.sort_by(fn comment ->
+      created_at_unix =
+        case comment.created_at do
+          %DateTime{} = datetime -> DateTime.to_unix(datetime, :microsecond)
+          _ -> -1
+        end
+
+      {created_at_unix, comment.id || ""}
+    end)
+  end
+
+  defp extract_comments(_), do: []
+
   defp extract_blockers(%{"inverseRelations" => %{"nodes" => inverse_relations}})
        when is_list(inverse_relations) do
     inverse_relations
@@ -627,4 +730,21 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp parse_priority(priority) when is_integer(priority), do: priority
   defp parse_priority(_priority), do: nil
+
+  defp normalize_text_field(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_text_field(_), do: nil
+
+  defp truncate_comment_body(body) when is_binary(body) do
+    if String.length(body) > @max_comment_body_chars do
+      String.slice(body, 0, @max_comment_body_chars) <> "...<truncated>"
+    else
+      body
+    end
+  end
 end

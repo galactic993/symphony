@@ -21,6 +21,25 @@ defmodule SymphonyElixir.Config do
   {% else %}
   No description provided.
   {% endif %}
+
+  Issue attachments:
+  {% if issue.attachments %}
+  {% for attachment in issue.attachments %}
+  - {% if attachment.title %}{{ attachment.title }}{% else %}Untitled attachment{% endif %}: {{ attachment.url }}{% if attachment.source_type %} (source: {{ attachment.source_type }}){% endif %}
+  {% endfor %}
+  {% else %}
+  No issue attachments.
+  {% endif %}
+
+  Recent comments:
+  {% if issue.comments %}
+  {% for comment in issue.comments %}
+  - Comment {{ comment.id }} (created: {{ comment.created_at }}):
+  {{ comment.body }}
+  {% endfor %}
+  {% else %}
+  No recent comments.
+  {% endif %}
   """
   @default_poll_interval_ms 30_000
   @default_workspace_root Path.join(System.tmp_dir!(), "symphony_workspaces")

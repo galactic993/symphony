@@ -96,6 +96,25 @@ Description:
 No description provided.
 {% endif %}
 
+Issue attachments:
+{% if issue.attachments %}
+{% for attachment in issue.attachments %}
+- {% if attachment.title %}{{ attachment.title }}{% else %}Untitled attachment{% endif %}: {{ attachment.url }}{% if attachment.source_type %} (source: {{ attachment.source_type }}){% endif %}
+{% endfor %}
+{% else %}
+No issue attachments.
+{% endif %}
+
+Recent comments:
+{% if issue.comments %}
+{% for comment in issue.comments %}
+- Comment {{ comment.id }} (created: {{ comment.created_at }}):
+{{ comment.body }}
+{% endfor %}
+{% else %}
+No recent comments.
+{% endif %}
+
 Instructions:
 
 1. This is an unattended orchestration session. Never ask a human to perform follow-up actions.

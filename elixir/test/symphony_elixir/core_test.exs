@@ -737,7 +737,23 @@ defmodule SymphonyElixir.CoreTest do
       description: "Render with rich template variables",
       state: "In Progress",
       url: "https://example.org/issues/MT-616/use-rich-templates-for-workflowmd",
-      labels: ["templating", "workflow"]
+      labels: ["templating", "workflow"],
+      attachments: [
+        %{
+          id: "attachment-1",
+          title: "Design capture",
+          url: "https://uploads.linear.app/design.png",
+          source_type: "upload"
+        }
+      ],
+      comments: [
+        %{
+          id: "comment-1",
+          body: "追加要件です。画像: https://uploads.linear.app/comment.png",
+          created_at: DateTime.from_naive!(~N[2026-02-26 18:06:48], "Etc/UTC"),
+          updated_at: DateTime.from_naive!(~N[2026-02-26 18:07:03], "Etc/UTC")
+        }
+      ]
     }
 
     on_exit(fn -> Workflow.set_workflow_file_path(workflow_path) end)
@@ -750,6 +766,11 @@ defmodule SymphonyElixir.CoreTest do
     assert prompt =~ "Title: Use rich templates for WORKFLOW.md"
     assert prompt =~ "Current status: In Progress"
     assert prompt =~ "https://example.org/issues/MT-616/use-rich-templates-for-workflowmd"
+    assert prompt =~ "Issue attachments:"
+    assert prompt =~ "Design capture: https://uploads.linear.app/design.png (source: upload)"
+    assert prompt =~ "Recent comments:"
+    assert prompt =~ "Comment comment-1 (created: 2026-02-26T18:06:48Z):"
+    assert prompt =~ "追加要件です。画像: https://uploads.linear.app/comment.png"
     assert prompt =~ "This is an unattended orchestration session."
     assert prompt =~ "Only stop early for a true blocker"
     assert prompt =~ "Do not include \"next steps for user\""
