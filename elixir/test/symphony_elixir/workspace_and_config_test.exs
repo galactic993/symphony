@@ -692,6 +692,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.linear_endpoint() == "https://api.linear.app/graphql"
     assert Config.linear_api_token() == nil
     assert Config.linear_project_slug() == nil
+    assert Config.polling_enabled?()
+    refute Config.linear_webhook_enabled?()
+    assert Config.linear_webhook_secret() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_concurrent_agents() == 10
     assert Config.codex_command() == "codex app-server"
@@ -754,7 +757,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},
       tracker_terminal_states: %{done: true},
+      polling_enabled: "maybe",
       poll_interval_ms: %{bad: true},
+      linear_webhook_enabled: "sometimes",
+      linear_webhook_secret: 123,
       workspace_root: 123,
       max_retry_backoff_ms: 0,
       max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"},
@@ -768,7 +774,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    assert Config.polling_enabled?()
     assert Config.poll_interval_ms() == 30_000
+    refute Config.linear_webhook_enabled?()
+    assert Config.linear_webhook_secret() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
     assert Config.max_retry_backoff_ms() == 300_000
     assert Config.max_concurrent_agents_for_state("Todo") == 1
@@ -926,28 +935,37 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   test "config resolves $VAR references for env-backed secret and path values" do
     workspace_env_var = "SYMP_WORKSPACE_ROOT_#{System.unique_integer([:positive])}"
     api_key_env_var = "SYMP_LINEAR_API_KEY_#{System.unique_integer([:positive])}"
+    webhook_secret_env_var = "SYMP_LINEAR_WEBHOOK_SECRET_#{System.unique_integer([:positive])}"
     workspace_root = Path.join("/tmp", "symphony-workspace-root")
     api_key = "resolved-secret"
+    webhook_secret = "resolved-webhook-secret"
     codex_bin = Path.join(["~", "bin", "codex"])
 
     previous_workspace_root = System.get_env(workspace_env_var)
     previous_api_key = System.get_env(api_key_env_var)
+    previous_webhook_secret = System.get_env(webhook_secret_env_var)
 
     System.put_env(workspace_env_var, workspace_root)
     System.put_env(api_key_env_var, api_key)
+    System.put_env(webhook_secret_env_var, webhook_secret)
 
     on_exit(fn ->
       restore_env(workspace_env_var, previous_workspace_root)
       restore_env(api_key_env_var, previous_api_key)
+      restore_env(webhook_secret_env_var, previous_webhook_secret)
     end)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "$#{api_key_env_var}",
+      linear_webhook_enabled: true,
+      linear_webhook_secret: "$#{webhook_secret_env_var}",
       workspace_root: "$#{workspace_env_var}",
       codex_command: "#{codex_bin} app-server"
     )
 
     assert Config.linear_api_token() == api_key
+    assert Config.linear_webhook_enabled?()
+    assert Config.linear_webhook_secret() == webhook_secret
     assert Config.workspace_root() == Path.expand(workspace_root)
     assert Config.codex_command() == "#{codex_bin} app-server"
   end

@@ -13,7 +13,7 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 ## How it works
 
-1. Polls Linear for candidate work
+1. Polls Linear for candidate work (or reacts to Linear webhooks)
 2. Creates an isolated workspace per issue
 3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
    workspace
@@ -92,6 +92,9 @@ Optional flags:
 - `--logs-root` tells Symphony to write logs under a different directory (default: `./log`)
 - `--port` also starts the Phoenix observability service (default: disabled)
 
+When using Linear webhooks, expose this server port publicly (for example via reverse proxy or
+tunnel) and configure the endpoint URL in Linear.
+
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
 
@@ -102,6 +105,12 @@ Minimal example:
 tracker:
   kind: linear
   project_slug: "..."
+webhooks:
+  linear:
+    enabled: true
+    secret: $LINEAR_WEBHOOK_SECRET
+polling:
+  enabled: false
 workspace:
   root: ~/code/workspaces
 hooks:
@@ -213,7 +222,8 @@ codex:
 
 - If `WORKFLOW.md` is missing or has invalid YAML, startup and scheduling are halted until fixed.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
-  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, `/api/v1/refresh`, and `/api/v1/webhooks/linear`.
+- `webhooks.linear.secret` reads from `LINEAR_WEBHOOK_SECRET` when unset or when value is `$LINEAR_WEBHOOK_SECRET`.
 
 ## Web dashboard
 

@@ -468,6 +468,168 @@ defmodule SymphonyElixir.ExtensionsTest do
              }
   end
 
+  test "linear webhook enqueues refresh when signature and timestamp are valid" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      linear_webhook_enabled: true,
+      linear_webhook_secret: "test-linear-webhook-secret"
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :WebhookOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll", "reconcile"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    payload = %{
+      "type" => "Issue",
+      "action" => "update",
+      "webhookTimestamp" => System.system_time(:millisecond)
+    }
+
+    payload_json = Jason.encode!(payload)
+
+    response =
+      build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header(
+        "linear-signature",
+        webhook_signature("test-linear-webhook-secret", payload_json)
+      )
+      |> post("/api/v1/webhooks/linear", payload_json)
+
+    assert %{
+             "queued" => true,
+             "coalesced" => false,
+             "operations" => ["poll", "reconcile"],
+             "source" => "linear_webhook"
+           } = json_response(response, 200)
+  end
+
+  test "linear webhook validates signature, timestamp, config, and method" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      linear_webhook_enabled: true,
+      linear_webhook_secret: "test-linear-webhook-secret"
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :WebhookValidationOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: true,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll", "reconcile"]
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    valid_payload_json =
+      Jason.encode!(%{
+        "type" => "Issue",
+        "action" => "update",
+        "webhookTimestamp" => System.system_time(:millisecond)
+      })
+
+    invalid_signature_response =
+      build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header("linear-signature", "invalid")
+      |> post("/api/v1/webhooks/linear", valid_payload_json)
+
+    assert json_response(invalid_signature_response, 401) ==
+             %{
+               "error" => %{
+                 "code" => "invalid_signature",
+                 "message" => "Invalid Linear webhook signature"
+               }
+             }
+
+    stale_payload_json =
+      Jason.encode!(%{
+        "type" => "Issue",
+        "action" => "update",
+        "webhookTimestamp" => System.system_time(:millisecond) - 120_000
+      })
+
+    stale_response =
+      build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header(
+        "linear-signature",
+        webhook_signature("test-linear-webhook-secret", stale_payload_json)
+      )
+      |> post("/api/v1/webhooks/linear", stale_payload_json)
+
+    assert json_response(stale_response, 401) ==
+             %{
+               "error" => %{
+                 "code" => "stale_timestamp",
+                 "message" => "Linear webhook timestamp is outside tolerance"
+               }
+             }
+
+    assert json_response(get(build_conn(), "/api/v1/webhooks/linear"), 405) ==
+             %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      linear_webhook_enabled: false,
+      linear_webhook_secret: "test-linear-webhook-secret"
+    )
+
+    disabled_response =
+      build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header(
+        "linear-signature",
+        webhook_signature("test-linear-webhook-secret", valid_payload_json)
+      )
+      |> post("/api/v1/webhooks/linear", valid_payload_json)
+
+    assert json_response(disabled_response, 404) ==
+             %{
+               "error" => %{
+                 "code" => "linear_webhook_disabled",
+                 "message" => "Linear webhook is not enabled"
+               }
+             }
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      linear_webhook_enabled: true,
+      linear_webhook_secret: nil
+    )
+
+    missing_secret_response =
+      build_conn()
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> Plug.Conn.put_req_header(
+        "linear-signature",
+        webhook_signature("test-linear-webhook-secret", valid_payload_json)
+      )
+      |> post("/api/v1/webhooks/linear", valid_payload_json)
+
+    assert json_response(missing_secret_response, 503) ==
+             %{
+               "error" => %{
+                 "code" => "linear_webhook_secret_missing",
+                 "message" => "Linear webhook secret is missing"
+               }
+             }
+  end
+
   test "dashboard bootstraps liveview from embedded static assets" do
     orchestrator_name = Module.concat(__MODULE__, :AssetOrchestrator)
 
@@ -713,6 +875,11 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
 
     HttpServer.bound_port()
+  end
+
+  defp webhook_signature(secret, payload_json) do
+    :crypto.mac(:hmac, :sha256, secret, payload_json)
+    |> Base.encode16(case: :lower)
   end
 
   defp assert_eventually(fun, attempts \\ 20)

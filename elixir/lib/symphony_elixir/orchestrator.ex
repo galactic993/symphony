@@ -29,9 +29,11 @@ defmodule SymphonyElixir.Orchestrator do
 
     defstruct [
       :poll_interval_ms,
+      :polling_enabled,
       :max_concurrent_agents,
       :next_poll_due_at_ms,
       :poll_check_in_progress,
+      :tick_queued,
       running: %{},
       completed: MapSet.new(),
       claimed: MapSet.new(),
@@ -53,9 +55,11 @@ defmodule SymphonyElixir.Orchestrator do
 
     state = %State{
       poll_interval_ms: Config.poll_interval_ms(),
+      polling_enabled: Config.polling_enabled?(),
       max_concurrent_agents: Config.max_concurrent_agents(),
       next_poll_due_at_ms: now_ms,
       poll_check_in_progress: false,
+      tick_queued: true,
       codex_totals: @empty_codex_totals,
       codex_rate_limits: nil
     }
@@ -69,7 +73,7 @@ defmodule SymphonyElixir.Orchestrator do
   @impl true
   def handle_info(:tick, state) do
     state = refresh_runtime_config(state)
-    state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil}
+    state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil, tick_queued: false}
 
     notify_dashboard()
     :ok = schedule_poll_cycle_start()
@@ -79,11 +83,17 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
-    now_ms = System.monotonic_time(:millisecond)
-    next_poll_due_at_ms = now_ms + state.poll_interval_ms
-    :ok = schedule_tick(state.poll_interval_ms)
 
-    state = %{state | poll_check_in_progress: false, next_poll_due_at_ms: next_poll_due_at_ms}
+    state =
+      if state.polling_enabled do
+        now_ms = System.monotonic_time(:millisecond)
+        next_poll_due_at_ms = now_ms + state.poll_interval_ms
+        :ok = schedule_tick(state.poll_interval_ms)
+
+        %{state | poll_check_in_progress: false, next_poll_due_at_ms: next_poll_due_at_ms, tick_queued: true}
+      else
+        %{state | poll_check_in_progress: false, next_poll_due_at_ms: nil, tick_queued: false}
+      end
 
     notify_dashboard()
     {:noreply, state}
@@ -995,7 +1005,7 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_call(:request_refresh, _from, state) do
     now_ms = System.monotonic_time(:millisecond)
     already_due? = is_integer(state.next_poll_due_at_ms) and state.next_poll_due_at_ms <= now_ms
-    coalesced = state.poll_check_in_progress == true or already_due?
+    coalesced = state.poll_check_in_progress == true or state.tick_queued == true or already_due?
 
     unless coalesced do
       :ok = schedule_tick(0)
@@ -1007,7 +1017,7 @@ defmodule SymphonyElixir.Orchestrator do
        coalesced: coalesced,
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
-     }, state}
+     }, %{state | tick_queued: true}}
   end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
@@ -1127,6 +1137,7 @@ defmodule SymphonyElixir.Orchestrator do
     %{
       state
       | poll_interval_ms: Config.poll_interval_ms(),
+        polling_enabled: Config.polling_enabled?(),
         max_concurrent_agents: Config.max_concurrent_agents()
     }
   end

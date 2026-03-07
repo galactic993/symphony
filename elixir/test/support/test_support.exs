@@ -101,7 +101,10 @@ defmodule SymphonyElixir.TestSupport do
           tracker_assignee: nil,
           tracker_active_states: ["Todo", "In Progress"],
           tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"],
+          polling_enabled: true,
           poll_interval_ms: 30_000,
+          linear_webhook_enabled: false,
+          linear_webhook_secret: nil,
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           max_concurrent_agents: 10,
           max_turns: 20,
@@ -138,7 +141,10 @@ defmodule SymphonyElixir.TestSupport do
     tracker_assignee = Keyword.get(config, :tracker_assignee)
     tracker_active_states = Keyword.get(config, :tracker_active_states)
     tracker_terminal_states = Keyword.get(config, :tracker_terminal_states)
+    polling_enabled = Keyword.get(config, :polling_enabled)
     poll_interval_ms = Keyword.get(config, :poll_interval_ms)
+    linear_webhook_enabled = Keyword.get(config, :linear_webhook_enabled)
+    linear_webhook_secret = Keyword.get(config, :linear_webhook_secret)
     workspace_root = Keyword.get(config, :workspace_root)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
     max_turns = Keyword.get(config, :max_turns)
@@ -177,7 +183,9 @@ defmodule SymphonyElixir.TestSupport do
         "  active_states: #{yaml_value(tracker_active_states)}",
         "  terminal_states: #{yaml_value(tracker_terminal_states)}",
         "polling:",
+        "  enabled: #{yaml_value(polling_enabled)}",
         "  interval_ms: #{yaml_value(poll_interval_ms)}",
+        webhooks_yaml(linear_webhook_enabled, linear_webhook_secret),
         "workspace:",
         "  root: #{yaml_value(workspace_root)}",
         "agent:",
@@ -248,6 +256,19 @@ defmodule SymphonyElixir.TestSupport do
       "  refresh_ms: #{yaml_value(refresh_ms)}",
       "  render_interval_ms: #{yaml_value(render_interval_ms)}"
     ]
+    |> Enum.join("\n")
+  end
+
+  defp webhooks_yaml(false, nil), do: nil
+
+  defp webhooks_yaml(enabled, secret) do
+    [
+      "webhooks:",
+      "  linear:",
+      "    enabled: #{yaml_value(enabled)}",
+      secret && "    secret: #{yaml_value(secret)}"
+    ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
 

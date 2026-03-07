@@ -42,6 +42,8 @@ defmodule SymphonyElixir.Config do
   {% endif %}
   """
   @default_poll_interval_ms 30_000
+  @default_polling_enabled true
+  @default_linear_webhook_enabled false
   @default_workspace_root Path.join(System.tmp_dir!(), "symphony_workspaces")
   @default_project_workspace_root Path.expand("~/symphony-workspace")
   @default_hook_timeout_ms 60_000
@@ -90,7 +92,25 @@ defmodule SymphonyElixir.Config do
                                type: :map,
                                default: %{},
                                keys: [
+                                 enabled: [type: :boolean, default: @default_polling_enabled],
                                  interval_ms: [type: :integer, default: @default_poll_interval_ms]
+                               ]
+                             ],
+                             webhooks: [
+                               type: :map,
+                               default: %{},
+                               keys: [
+                                 linear: [
+                                   type: :map,
+                                   default: %{},
+                                   keys: [
+                                     enabled: [
+                                       type: :boolean,
+                                       default: @default_linear_webhook_enabled
+                                     ],
+                                     secret: [type: {:or, [:string, nil]}, default: nil]
+                                   ]
+                                 ]
                                ]
                              ],
                              workspace: [
@@ -291,6 +311,24 @@ defmodule SymphonyElixir.Config do
   @spec poll_interval_ms() :: pos_integer()
   def poll_interval_ms do
     get_in(validated_workflow_options(), [:polling, :interval_ms])
+  end
+
+  @spec polling_enabled?() :: boolean()
+  def polling_enabled? do
+    get_in(validated_workflow_options(), [:polling, :enabled])
+  end
+
+  @spec linear_webhook_enabled?() :: boolean()
+  def linear_webhook_enabled? do
+    get_in(validated_workflow_options(), [:webhooks, :linear, :enabled])
+  end
+
+  @spec linear_webhook_secret() :: String.t() | nil
+  def linear_webhook_secret do
+    validated_workflow_options()
+    |> get_in([:webhooks, :linear, :secret])
+    |> resolve_env_value(System.get_env("LINEAR_WEBHOOK_SECRET"))
+    |> normalize_secret_value()
   end
 
   @spec workspace_root() :: Path.t()
@@ -547,6 +585,7 @@ defmodule SymphonyElixir.Config do
     %{
       tracker: extract_tracker_options(section_map(config, "tracker")),
       polling: extract_polling_options(section_map(config, "polling")),
+      webhooks: extract_webhooks_options(section_map(config, "webhooks")),
       workspace: extract_workspace_options(section_map(config, "workspace")),
       agent: extract_agent_options(section_map(config, "agent")),
       codex: extract_codex_options(section_map(config, "codex")),
@@ -571,7 +610,19 @@ defmodule SymphonyElixir.Config do
 
   defp extract_polling_options(section) do
     %{}
+    |> put_if_present(:enabled, boolean_value(Map.get(section, "enabled")))
     |> put_if_present(:interval_ms, integer_value(Map.get(section, "interval_ms")))
+  end
+
+  defp extract_webhooks_options(section) do
+    %{}
+    |> put_if_present(:linear, extract_linear_webhook_options(section_map(section, "linear")))
+  end
+
+  defp extract_linear_webhook_options(section) do
+    %{}
+    |> put_if_present(:enabled, boolean_value(Map.get(section, "enabled")))
+    |> put_if_present(:secret, binary_value(Map.get(section, "secret"), allow_empty: true))
   end
 
   defp extract_workspace_options(section) do

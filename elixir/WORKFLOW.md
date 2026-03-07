@@ -46,7 +46,12 @@ tracker:
     - Duplicate
     - Done
 polling:
+  enabled: false
   interval_ms: 5000
+webhooks:
+  linear:
+    enabled: true
+    secret: $LINEAR_WEBHOOK_SECRET
 workspace:
   root: ~/symphony-workspaces
 hooks:

@@ -84,6 +84,7 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     assert Config.poll_interval_ms() == 30_000
+    assert Config.polling_enabled?()
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert Config.linear_assignee() == nil
@@ -94,6 +95,9 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: 45_000)
     assert Config.poll_interval_ms() == 45_000
+
+    write_workflow_file!(Workflow.workflow_file_path(), polling_enabled: false)
+    refute Config.polling_enabled?()
 
     write_workflow_file!(Workflow.workflow_file_path(), max_turns: 0)
     assert Config.agent_max_turns() == 20
