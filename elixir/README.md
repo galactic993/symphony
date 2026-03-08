@@ -69,6 +69,10 @@ mise exec -- mix build
 mise exec -- ./bin/symphony ./WORKFLOW.md
 ```
 
+`mise exec -- make all` is the full CI-quality gate (`build`, `fmt-check`, `lint`,
+`coverage`, `dialyzer`). Use the run commands above for local startup; use `make all`
+when you want the full validation pass.
+
 ### Run with `dotenvx` + Keychain + cloudflared
 
 Store `LINEAR_API_KEY` in macOS Keychain once, then start Symphony through `dotenvx`:

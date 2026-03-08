@@ -13,6 +13,8 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
+          Mix.Tasks.Workflow.Projects.Add,
+          SymphonyElixir.Application,
           SymphonyElixir.Config,
           SymphonyElixir.Linear.Client,
           SymphonyElixir.SpecsCheck,

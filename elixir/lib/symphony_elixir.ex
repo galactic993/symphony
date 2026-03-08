@@ -23,14 +23,15 @@ defmodule SymphonyElixir.Application do
   def start(_type, _args) do
     :ok = SymphonyElixir.LogFile.configure()
 
-    children = [
-      {Phoenix.PubSub, name: SymphonyElixir.PubSub},
-      {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
-      SymphonyElixir.WorkflowStore,
-      SymphonyElixir.Orchestrator,
-      SymphonyElixir.HttpServer,
-      SymphonyElixir.StatusDashboard
-    ]
+    children =
+      [
+        {Phoenix.PubSub, name: SymphonyElixir.PubSub},
+        {Task.Supervisor, name: SymphonyElixir.TaskSupervisor},
+        SymphonyElixir.WorkflowStore,
+        SymphonyElixir.Orchestrator,
+        SymphonyElixir.StatusDashboard
+      ]
+      |> maybe_add_http_server()
 
     Supervisor.start_link(
       children,
@@ -43,5 +44,13 @@ defmodule SymphonyElixir.Application do
   def stop(_state) do
     SymphonyElixir.StatusDashboard.render_offline_status()
     :ok
+  end
+
+  defp maybe_add_http_server(children) when is_list(children) do
+    if Application.get_env(:symphony_elixir, :start_http_server, true) do
+      List.insert_at(children, -1, SymphonyElixir.HttpServer)
+    else
+      children
+    end
   end
 end

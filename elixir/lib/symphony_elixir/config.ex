@@ -746,7 +746,7 @@ defmodule SymphonyElixir.Config do
 
   defp tracker_projects_value(values) when is_list(values) do
     values
-    |> normalize_linear_projects(nil)
+    |> normalize_linear_projects(:preserve_relative)
     |> case do
       [] -> :omit
       projects -> projects
@@ -760,8 +760,6 @@ defmodule SymphonyElixir.Config do
     |> Map.get("dir_root", Map.get(section, "dirRoot"))
     |> binary_value()
   end
-
-  defp tracker_dir_root_value(_section), do: :omit
 
   defp maybe_append_csv_value(acc, value) do
     case scalar_string_value(value) do
@@ -990,29 +988,57 @@ defmodule SymphonyElixir.Config do
         nil
 
       path ->
-        case normalize_path_token(path) do
-          :missing ->
-            nil
-
-          normalized_path ->
-            trimmed_path = String.trim(normalized_path)
-
-            cond do
-              trimmed_path == "" ->
-                nil
-
-              uri_path?(trimmed_path) ->
-                trimmed_path
-
-              Path.type(trimmed_path) == :relative and is_binary(dir_root) and String.trim(dir_root) != "" ->
-                Path.expand(trimmed_path, dir_root)
-
-              true ->
-                Path.expand(trimmed_path)
-            end
-        end
+        path
+        |> normalize_path_token()
+        |> expand_linear_project_dir(dir_root)
     end
   end
+
+  defp expand_linear_project_dir(:missing, _dir_root), do: nil
+
+  defp expand_linear_project_dir(normalized_path, :preserve_relative)
+       when is_binary(normalized_path) do
+    trimmed_path = String.trim(normalized_path)
+
+    cond do
+      trimmed_path == "" ->
+        nil
+
+      uri_path?(trimmed_path) ->
+        trimmed_path
+
+      Path.type(trimmed_path) == :relative ->
+        trimmed_path
+
+      true ->
+        Path.expand(trimmed_path)
+    end
+  end
+
+  defp expand_linear_project_dir(normalized_path, dir_root) when is_binary(normalized_path) do
+    trimmed_path = String.trim(normalized_path)
+
+    cond do
+      trimmed_path == "" ->
+        nil
+
+      uri_path?(trimmed_path) ->
+        trimmed_path
+
+      relative_path_with_dir_root?(trimmed_path, dir_root) ->
+        Path.expand(trimmed_path, dir_root)
+
+      true ->
+        Path.expand(trimmed_path)
+    end
+  end
+
+  defp relative_path_with_dir_root?(trimmed_path, dir_root)
+       when is_binary(trimmed_path) and is_binary(dir_root) do
+    Path.type(trimmed_path) == :relative and String.trim(dir_root) != ""
+  end
+
+  defp relative_path_with_dir_root?(_trimmed_path, _dir_root), do: false
 
   defp normalize_linear_project_dir_root(project_dir_root) do
     case binary_value(project_dir_root) do

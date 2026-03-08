@@ -265,17 +265,7 @@ defmodule Mix.Tasks.Workflow.Projects.Add do
       Enum.reduce(projects, {[], false, false}, fn project, {acc, matched?, changed?} ->
         case Map.get(project, "slug") do
           ^slug ->
-            if matched? do
-              {acc, matched?, changed?}
-            else
-              updated_project =
-                project
-                |> Map.put("slug", slug)
-                |> Map.put("dir", dir)
-
-              was_changed = changed? or Map.get(project, "dir") != dir
-              {acc ++ [updated_project], true, was_changed}
-            end
+            upsert_matching_project(acc, project, slug, dir, matched?, changed?)
 
           _ ->
             {acc ++ [project], matched?, changed?}
@@ -292,6 +282,20 @@ defmodule Mix.Tasks.Workflow.Projects.Add do
       true ->
         {updated_projects, :unchanged}
     end
+  end
+
+  defp upsert_matching_project(acc, _project, _slug, _dir, true, changed?) do
+    {acc, true, changed?}
+  end
+
+  defp upsert_matching_project(acc, project, slug, dir, false, changed?) do
+    updated_project =
+      project
+      |> Map.put("slug", slug)
+      |> Map.put("dir", dir)
+
+    was_changed = changed? or Map.get(project, "dir") != dir
+    {acc ++ [updated_project], true, was_changed}
   end
 
   defp render_projects_lines(projects) do

@@ -125,14 +125,9 @@ defmodule Mix.Tasks.Workflow.Projects.AddTest do
         """
       )
 
-      error_output =
-        capture_io(:stderr, fn ->
-          assert_raise Mix.Error, ~r/missing top-level `tracker:` section/, fn ->
-            Add.run(["--slug", "d0641848a5df", "--dir", "fileMaker/training"])
-          end
-        end)
-
-      assert error_output =~ "missing top-level `tracker:` section"
+      assert_raise Mix.Error, ~r/missing top-level `tracker:` section/, fn ->
+        Add.run(["--slug", "d0641848a5df", "--dir", "fileMaker/training"])
+      end
     end)
   end
 

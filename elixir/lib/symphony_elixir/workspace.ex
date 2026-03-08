@@ -284,24 +284,22 @@ defmodule SymphonyElixir.Workspace do
     project_workspace_root = Path.expand(Config.project_workspace_root())
     project_root_prefix = project_workspace_root <> "/"
 
-    cond do
-      not String.starts_with?(expanded_workspace <> "/", project_root_prefix) ->
-        {:error, {:project_workspace_outside_root, expanded_workspace, project_workspace_root}}
+    if String.starts_with?(expanded_workspace <> "/", project_root_prefix) do
+      case File.stat(expanded_workspace) do
+        {:ok, %File.Stat{type: :directory}} ->
+          :ok
 
-      true ->
-        case File.stat(expanded_workspace) do
-          {:ok, %File.Stat{type: :directory}} ->
-            :ok
+        {:ok, %File.Stat{type: type}} ->
+          {:error, {:project_workspace_not_directory, expanded_workspace, type}}
 
-          {:ok, %File.Stat{type: type}} ->
-            {:error, {:project_workspace_not_directory, expanded_workspace, type}}
+        {:error, :enoent} ->
+          :ok
 
-          {:error, :enoent} ->
-            :ok
-
-          {:error, reason} ->
-            {:error, {:project_workspace_unreadable, expanded_workspace, reason}}
-        end
+        {:error, reason} ->
+          {:error, {:project_workspace_unreadable, expanded_workspace, reason}}
+      end
+    else
+      {:error, {:project_workspace_outside_root, expanded_workspace, project_workspace_root}}
     end
   end
 
@@ -440,8 +438,6 @@ defmodule SymphonyElixir.Workspace do
     |> issue_context()
     |> Map.get(:project_dir)
   end
-
-  defp project_workspace_dir(_issue_or_identifier), do: nil
 
   defp project_bound_workspace?(%{project_dir: project_dir}) when is_binary(project_dir) do
     String.trim(project_dir) != ""

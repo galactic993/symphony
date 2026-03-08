@@ -1,6 +1,7 @@
 import Config
 
 config :phoenix, :json_library, Jason
+config :symphony_elixir, :start_http_server, config_env() != :test
 
 config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

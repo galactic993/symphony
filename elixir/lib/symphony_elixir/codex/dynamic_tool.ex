@@ -148,16 +148,21 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     linear_client = Keyword.get(opts, :linear_client, &Client.graphql/3)
     upload_request = Keyword.get(opts, :upload_request, &upload_file_request/3)
 
-    with {:ok, issue_ref, path, comment_body, content_type, make_public} <-
+    with {:ok, normalized_upload} <-
            normalize_linear_upload_arguments(arguments),
-         {:ok, file_info} <- resolve_upload_file(path, content_type),
-         {:ok, issue} <- resolve_issue(issue_ref, linear_client),
-         {:ok, upload} <- request_file_upload(file_info, make_public, linear_client),
+         {:ok, file_info} <-
+           resolve_upload_file(
+             normalized_upload.path,
+             normalized_upload.content_type
+           ),
+         {:ok, issue} <- resolve_issue(normalized_upload.issue_ref, linear_client),
+         {:ok, upload} <-
+           request_file_upload(file_info, normalized_upload.make_public, linear_client),
          :ok <- upload_request.(upload.upload_url, upload.headers, file_info),
          {:ok, comment} <-
            create_issue_comment(
              issue.id,
-             build_asset_comment_body(comment_body, upload.asset_url),
+             build_asset_comment_body(normalized_upload.comment_body, upload.asset_url),
              linear_client
            ) do
       success_response(%{
@@ -219,12 +224,34 @@ defmodule SymphonyElixir.Codex.DynamicTool do
            normalize_optional_string(content_type, :invalid_upload_content_type),
          {:ok, normalized_make_public} <-
            normalize_optional_boolean(make_public, false, :invalid_upload_make_public) do
-      {:ok, normalized_issue_ref, normalized_path, normalized_comment_body,
-       normalized_content_type, normalized_make_public}
+      build_normalized_upload_arguments_result(
+        normalized_issue_ref,
+        normalized_path,
+        normalized_comment_body,
+        normalized_content_type,
+        normalized_make_public
+      )
     end
   end
 
   defp normalize_linear_upload_arguments(_arguments), do: {:error, :invalid_upload_arguments}
+
+  defp build_normalized_upload_arguments_result(
+         normalized_issue_ref,
+         normalized_path,
+         normalized_comment_body,
+         normalized_content_type,
+         normalized_make_public
+       ) do
+    {:ok,
+     %{
+       issue_ref: normalized_issue_ref,
+       path: normalized_path,
+       comment_body: normalized_comment_body,
+       content_type: normalized_content_type,
+       make_public: normalized_make_public
+     }}
+  end
 
   defp normalize_query(arguments) do
     case Map.get(arguments, "query") || Map.get(arguments, :query) do
