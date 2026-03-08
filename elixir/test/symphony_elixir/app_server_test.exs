@@ -284,14 +284,33 @@ defmodule SymphonyElixir.AppServerTest do
 
                  payload["id"] == 2 and
                    case get_in(payload, ["params", "dynamicTools"]) do
-                     [
-                       %{
-                         "description" => description,
-                         "inputSchema" => %{"required" => ["query"]},
-                         "name" => "linear_graphql"
-                       }
-                     ] ->
-                       description =~ "Linear"
+                     tools when is_list(tools) ->
+                       Enum.sort(Enum.map(tools, & &1["name"])) == [
+                         "linear_graphql",
+                         "linear_upload_issue_asset"
+                       ] and
+                         Enum.any?(tools, fn
+                           %{
+                             "description" => description,
+                             "inputSchema" => %{"required" => ["query"]},
+                             "name" => "linear_graphql"
+                           } ->
+                             description =~ "Linear"
+
+                           _ ->
+                             false
+                         end) and
+                         Enum.any?(tools, fn
+                           %{
+                             "description" => description,
+                             "inputSchema" => %{"required" => ["issueId", "path"]},
+                             "name" => "linear_upload_issue_asset"
+                           } ->
+                             description =~ "Upload a local file"
+
+                           _ ->
+                             false
+                         end)
 
                      _ ->
                        false

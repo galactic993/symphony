@@ -173,6 +173,11 @@ This workflow depends on exact Linear state names: `Todo`, `In Progress`, `Human
 - `pull`: keep branch updated with latest `origin/main` before handoff.
 - `land`: when ticket reaches `Merging`, explicitly open and follow `.codex/skills/land/SKILL.md`, which includes the `land` loop.
 
+Symphony-provided dynamic tools:
+
+- `linear_graphql`: raw Linear GraphQL access for issue state, comments, and attachments.
+- `linear_upload_issue_asset`: upload a local screenshot/video/log artifact to Linear and create an issue comment with the resulting asset URL.
+
 ## Status map
 
 - `Backlog` -> out of scope for this workflow; do not modify.
@@ -284,7 +289,9 @@ Use this only when completion is blocked by missing required tools or missing au
     - You may make temporary local proof edits to validate assumptions (for example: tweak a local build input for `make`, or hardcode a UI account / response path) when this increases confidence.
     - Revert every temporary proof edit before commit/push.
     - Document these temporary proof steps and outcomes in the workpad `Validation`/`Notes` sections so reviewers can follow the evidence.
-    - If app-touching, run `launch-app` validation and capture/upload media via `github-pr-media` before handoff.
+    - If app-touching, collect visual proof before handoff.
+    - Preferred when available: run `launch-app` validation and capture/upload media via `github-pr-media`.
+    - Required fallback when those helpers are unavailable: capture or reuse a local artifact (for example a Playwright video/screenshot/log), then upload it to the Linear issue with `linear_upload_issue_asset`.
 6.  Re-check all acceptance criteria and close any gaps.
 7.  Before every `git push` attempt, run the required validation for your scope and confirm it passes; if it fails, address issues and rerun until green, then commit and push changes.
 8.  Attach PR URL to the issue (prefer attachment; use the workpad comment only if attachment is unavailable).

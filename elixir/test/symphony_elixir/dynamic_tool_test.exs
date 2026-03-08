@@ -3,8 +3,10 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
   alias SymphonyElixir.Codex.DynamicTool
 
-  test "tool_specs advertises the linear_graphql input contract" do
-    assert [
+  test "tool_specs advertises the supported dynamic tool contracts" do
+    specs = DynamicTool.tool_specs()
+
+    assert Enum.any?(specs, fn
              %{
                "description" => description,
                "inputSchema" => %{
@@ -16,10 +18,34 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
                  "type" => "object"
                },
                "name" => "linear_graphql"
-             }
-           ] = DynamicTool.tool_specs()
+             } ->
+               description =~ "Linear"
 
-    assert description =~ "Linear"
+             _ ->
+               false
+           end)
+
+    assert Enum.any?(specs, fn
+             %{
+               "description" => description,
+               "inputSchema" => %{
+                 "properties" => %{
+                   "commentBody" => _,
+                   "contentType" => _,
+                   "issueId" => _,
+                   "makePublic" => _,
+                   "path" => _
+                 },
+                 "required" => ["issueId", "path"],
+                 "type" => "object"
+               },
+               "name" => "linear_upload_issue_asset"
+             } ->
+               description =~ "Upload a local file"
+
+             _ ->
+               false
+           end)
   end
 
   test "unsupported tools return a failure payload with the supported tool list" do
@@ -37,7 +63,204 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert Jason.decode!(text) == %{
              "error" => %{
                "message" => ~s(Unsupported dynamic tool: "not_a_real_tool".),
-               "supportedTools" => ["linear_graphql"]
+               "supportedTools" => ["linear_graphql", "linear_upload_issue_asset"]
+             }
+           }
+  end
+
+  test "linear_upload_issue_asset uploads a local file and creates a Linear comment" do
+    test_pid = self()
+
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-linear-upload-tool-#{System.unique_integer([:positive])}"
+      )
+
+    file_path = Path.join(test_root, "walkthrough.mp4")
+    File.mkdir_p!(test_root)
+    File.write!(file_path, "video-bytes")
+
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    response =
+      DynamicTool.execute(
+        "linear_upload_issue_asset",
+        %{
+          "issueId" => "MEZ-153",
+          "path" => file_path,
+          "commentBody" => "Walkthrough video"
+        },
+        linear_client: fn query, variables, opts ->
+          cond do
+            String.contains?(query, "SymphonyResolveIssue") ->
+              send(test_pid, {:resolve_issue_call, variables, opts})
+              {:ok, %{"data" => %{"issue" => %{"id" => "issue-123", "identifier" => "MEZ-153"}}}}
+
+            String.contains?(query, "SymphonyFileUpload") ->
+              send(test_pid, {:file_upload_call, variables, opts})
+
+              {:ok,
+               %{
+                 "data" => %{
+                   "fileUpload" => %{
+                     "success" => true,
+                     "uploadFile" => %{
+                       "uploadUrl" => "https://upload.example.test/put",
+                       "assetUrl" => "https://uploads.linear.app/demo.mp4",
+                       "headers" => [%{"key" => "x-test-header", "value" => "1"}]
+                     }
+                   }
+                 }
+               }}
+
+            String.contains?(query, "SymphonyCreateComment") ->
+              send(test_pid, {:comment_create_call, variables, opts})
+
+              {:ok,
+               %{
+                 "data" => %{
+                   "commentCreate" => %{
+                     "success" => true,
+                     "comment" => %{
+                       "id" => "comment-1",
+                       "url" => "https://linear.app/mezame-ai/comment/comment-1"
+                     }
+                   }
+                 }
+               }}
+
+            true ->
+              flunk("unexpected query: #{query}")
+          end
+        end,
+        upload_request: fn upload_url, headers, file_info ->
+          send(test_pid, {:upload_request, upload_url, headers, file_info})
+          :ok
+        end
+      )
+
+    assert_received {:resolve_issue_call, %{issueId: "MEZ-153"}, []}
+
+    assert_received {:file_upload_call,
+                     %{
+                       contentType: "video/mp4",
+                       filename: "walkthrough.mp4",
+                       makePublic: false,
+                       size: 11
+                     }, []}
+
+    assert_received {:upload_request, "https://upload.example.test/put", headers, %{content_type: "video/mp4", filename: "walkthrough.mp4", path: expanded_path, size: 11}}
+
+    assert expanded_path == Path.expand(file_path)
+    assert {"content-type", "video/mp4"} in headers
+    assert {"x-test-header", "1"} in headers
+
+    assert_received {:comment_create_call, %{body: "Walkthrough video\n\nhttps://uploads.linear.app/demo.mp4", issueId: "issue-123"}, []}
+
+    assert response["success"] == true
+
+    assert [
+             %{
+               "type" => "inputText",
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "assetUrl" => "https://uploads.linear.app/demo.mp4",
+             "commentId" => "comment-1",
+             "commentUrl" => "https://linear.app/mezame-ai/comment/comment-1",
+             "contentType" => "video/mp4",
+             "issueId" => "issue-123",
+             "issueIdentifier" => "MEZ-153",
+             "path" => Path.expand(file_path)
+           }
+  end
+
+  test "linear_upload_issue_asset validates required arguments before touching Linear" do
+    response =
+      DynamicTool.execute(
+        "linear_upload_issue_asset",
+        %{"path" => "/tmp/demo.mp4"},
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called when upload arguments are invalid")
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => "`linear_upload_issue_asset` requires `issueId` (ticket key or internal id)."
+             }
+           }
+  end
+
+  test "linear_upload_issue_asset formats upload transport failures" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-linear-upload-tool-error-#{System.unique_integer([:positive])}"
+      )
+
+    file_path = Path.join(test_root, "walkthrough.mp4")
+    File.mkdir_p!(test_root)
+    File.write!(file_path, "video-bytes")
+
+    on_exit(fn -> File.rm_rf(test_root) end)
+
+    response =
+      DynamicTool.execute(
+        "linear_upload_issue_asset",
+        %{"issueId" => "MEZ-153", "path" => file_path},
+        linear_client: fn query, _variables, _opts ->
+          cond do
+            String.contains?(query, "SymphonyResolveIssue") ->
+              {:ok, %{"data" => %{"issue" => %{"id" => "issue-123", "identifier" => "MEZ-153"}}}}
+
+            String.contains?(query, "SymphonyFileUpload") ->
+              {:ok,
+               %{
+                 "data" => %{
+                   "fileUpload" => %{
+                     "success" => true,
+                     "uploadFile" => %{
+                       "uploadUrl" => "https://upload.example.test/put",
+                       "assetUrl" => "https://uploads.linear.app/demo.mp4",
+                       "headers" => []
+                     }
+                   }
+                 }
+               }}
+
+            true ->
+              flunk("comment creation should not be attempted after upload failure")
+          end
+        end,
+        upload_request: fn _upload_url, _headers, _file_info ->
+          {:error, {:linear_upload_request, :timeout}}
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => "Linear asset upload failed before receiving a successful response.",
+               "reason" => ":timeout"
              }
            }
   end
