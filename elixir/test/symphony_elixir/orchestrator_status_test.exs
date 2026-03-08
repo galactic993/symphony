@@ -1,6 +1,50 @@
 defmodule SymphonyElixir.OrchestratorStatusTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FakeLinearClient do
+    def fetch_candidate_issues do
+      case Application.get_env(:symphony_elixir, :orchestrator_status_linear_results, []) do
+        [result | rest] ->
+          Application.put_env(:symphony_elixir, :orchestrator_status_linear_results, rest)
+          result
+
+        _ ->
+          {:ok, []}
+      end
+    end
+
+    def fetch_issues_by_states(_states), do: {:ok, []}
+    def fetch_issue_states_by_ids(_issue_ids), do: {:ok, []}
+    def graphql(_query, _variables), do: {:error, :not_implemented}
+  end
+
+  setup do
+    linear_client_module = Application.get_env(:symphony_elixir, :linear_client_module)
+
+    orchestrator_status_linear_results =
+      Application.get_env(:symphony_elixir, :orchestrator_status_linear_results)
+
+    on_exit(fn ->
+      if is_nil(linear_client_module) do
+        Application.delete_env(:symphony_elixir, :linear_client_module)
+      else
+        Application.put_env(:symphony_elixir, :linear_client_module, linear_client_module)
+      end
+
+      if is_nil(orchestrator_status_linear_results) do
+        Application.delete_env(:symphony_elixir, :orchestrator_status_linear_results)
+      else
+        Application.put_env(
+          :symphony_elixir,
+          :orchestrator_status_linear_results,
+          orchestrator_status_linear_results
+        )
+      end
+    end)
+
+    :ok
+  end
+
   test "snapshot returns :timeout when snapshot server is unresponsive" do
     server_name = Module.concat(__MODULE__, :UnresponsiveSnapshotServer)
     parent = self()
@@ -932,6 +976,41 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
 
     coalesced_refresh = Orchestrator.request_refresh(orchestrator_name)
     assert %{queued: true, coalesced: true, operations: ["poll", "reconcile"]} = coalesced_refresh
+  end
+
+  test "orchestrator retries transient tracker fetch failures even when polling is disabled" do
+    Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
+
+    Application.put_env(:symphony_elixir, :orchestrator_status_linear_results, [
+      {:error, {:linear_api_request, %Req.TransportError{reason: :closed}}},
+      {:ok, []}
+    ])
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: "project",
+      polling_enabled: false
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :TransientRetryOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    retry_state =
+      wait_for_state(pid, fn state ->
+        state.poll_check_in_progress == false and state.tick_queued == true and
+          is_integer(state.next_poll_due_at_ms) and
+          state.next_poll_due_at_ms > System.monotonic_time(:millisecond)
+      end)
+
+    remaining_ms = retry_state.next_poll_due_at_ms - System.monotonic_time(:millisecond)
+    assert remaining_ms > 0
+    assert remaining_ms <= 5_000
   end
 
   test "orchestrator restarts stalled workers with retry backoff" do

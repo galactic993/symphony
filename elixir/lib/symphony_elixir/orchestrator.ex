@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
+  @tracker_fetch_retry_delay_ms 5_000
   @failure_state_name "Human Review"
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
@@ -103,14 +104,7 @@ defmodule SymphonyElixir.Orchestrator do
 
         state
       else
-        %{
-          state
-          | poll_check_in_progress: false,
-            next_poll_due_at_ms: nil,
-            tick_queued: false,
-            tick_timer_id: nil,
-            tick_timer_ref: nil
-        }
+        finalize_non_polling_cycle(state)
       end
 
     notify_dashboard()
@@ -192,6 +186,21 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
+  defp finalize_non_polling_cycle(%State{tick_queued: true} = state) do
+    %{state | poll_check_in_progress: false}
+  end
+
+  defp finalize_non_polling_cycle(state) do
+    %{
+      state
+      | poll_check_in_progress: false,
+        next_poll_due_at_ms: nil,
+        tick_queued: false,
+        tick_timer_id: nil,
+        tick_timer_ref: nil
+    }
+  end
+
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
 
@@ -248,12 +257,30 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
+        maybe_schedule_tracker_fetch_retry(state, reason)
 
       false ->
         state
     end
   end
+
+  defp maybe_schedule_tracker_fetch_retry(%State{} = state, reason) do
+    if state.polling_enabled or state.tick_queued or !transient_tracker_fetch_error?(reason) do
+      state
+    else
+      Logger.warning("Scheduling tracker refresh retry in #{@tracker_fetch_retry_delay_ms}ms after transient fetch failure: #{inspect(reason)}")
+
+      schedule_tick(state, @tracker_fetch_retry_delay_ms)
+    end
+  end
+
+  defp transient_tracker_fetch_error?({:linear_api_request, _reason}), do: true
+
+  defp transient_tracker_fetch_error?({:linear_api_status, status})
+       when is_integer(status) and status >= 500,
+       do: true
+
+  defp transient_tracker_fetch_error?(_reason), do: false
 
   defp reconcile_running_issues(%State{} = state) do
     state = reconcile_stalled_running_issues(state)
