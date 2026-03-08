@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub PR Media"
+  short_description: "Attach screenshots or videos to GitHub PRs"
+  default_prompt: "Use $github-pr-media to publish screenshots or video evidence for the current GitHub PR and update the PR comment with links."

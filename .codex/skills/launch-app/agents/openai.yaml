@@ -1,0 +1,4 @@
+interface:
+  display_name: "Launch App"
+  short_description: "Launch and verify local app runtimes"
+  default_prompt: "Use $launch-app to boot the local app, wait for readiness, and capture the access URL and logs."
