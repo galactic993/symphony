@@ -132,9 +132,22 @@ Work only in the provided repository copy. Do not touch any other path.
 
 The agent should be able to talk to Linear, either via a configured Linear MCP server or injected `linear_graphql` tool. If none are present, stop and ask the user to configure Linear.
 
+## Prerequisite: Required team workflow states exist
+
+This workflow depends on exact Linear state names: `Todo`, `In Progress`, `Human Review`, `Rework`, `Merging`, and `Done`.
+
+1. Before reading the ticket state or performing any state transition, fetch the issue by explicit ticket ID and inspect `issue.team.states`.
+2. Build an exact `state name -> state id` map from that team state list.
+3. If any of `Human Review`, `Rework`, or `Merging` are missing, create them immediately with Linear GraphQL `workflowStateCreate(input: ...)`, then re-fetch `issue.team.states`.
+   - Create `Human Review` with type `started` and color `#f2c94c`.
+   - Create `Rework` with type `started` and color `#e6e6e6`.
+   - Create `Merging` with type `started` and color `#5b8def`.
+4. If `Todo`, `In Progress`, or `Done` are missing, or if the custom states still cannot be resolved after creation, treat that as a blocker: record it in the workpad, leave the issue in its current non-terminal state, and stop. Do not substitute `Done`.
+5. Every state transition must use the exact state id resolved from the team state map. Never guess by workflow type/name similarity, and never fall back to `Done` because an intermediate workflow state is unavailable.
+
 ## Default posture
 
-- Start by determining the ticket's current status, then follow the matching flow for that status.
+- Start by bootstrapping/verifying the required team workflow states, then determine the ticket's current status and follow the matching flow for that status.
 - Start every task by opening the tracking workpad comment and bringing it up to date before doing new implementation work.
 - Spend extra effort up front on planning and verification design before implementation.
 - Reproduce first: always confirm the current behavior/issue signal before changing code so the fix target is explicit.
@@ -169,12 +182,12 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - `Human Review` -> PR is attached and validated; waiting on human approval.
 - `Merging` -> approved by human; execute the `land` skill flow (do not call `gh pr merge` directly).
 - `Rework` -> reviewer requested changes; planning + implementation required.
-- `Done` -> terminal state; no further action required.
+- `Done` -> terminal state; no further action required. Reserved strictly for the post-merge completion step in `Step 3`; never use it as a substitute for `Human Review`, `Rework`, or `Merging`.
 
 ## Step 0: Determine current ticket state and route
 
-1. Fetch the issue by explicit ticket ID.
-2. Read the current state.
+1. Fetch the issue by explicit ticket ID, including the team workflow states needed for the prerequisite state bootstrap above.
+2. Read the current state after the workflow state map has been verified/refreshed.
 3. Route to the matching flow:
    - `Backlog` -> do not modify issue content/state; stop and wait for human to move it to `Todo`.
    - `Todo` -> immediately move to `In Progress`, then ensure bootstrap workpad comment exists (create if missing), then start execution flow.
@@ -292,6 +305,7 @@ Use this only when completion is blocked by missing required tools or missing au
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
 12. Only then move issue to `Human Review`.
     - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
+    - Never move directly from `Todo`, `In Progress`, or `Rework` to `Done`.
 13. For `Todo` tickets that already had a PR attached at kickoff:
     - Ensure all existing PR feedback was reviewed and resolved, including inline review comments (code changes or explicit, justified pushback response).
     - Ensure branch was pushed with any required updates.
@@ -333,6 +347,7 @@ Use this only when completion is blocked by missing required tools or missing au
 - If the branch PR is already closed/merged, do not reuse that branch or prior implementation state for continuation.
 - For closed/merged branch PRs, create a new branch from `origin/main` and restart from reproduction/planning as if starting fresh.
 - If issue state is `Backlog`, do not modify it; wait for human to move to `Todo`.
+- Never move directly from `Todo`, `In Progress`, or `Rework` to `Done`; `Done` is only valid after merge completion in `Step 3`.
 - Do not edit the issue body/description for planning or progress tracking.
 - Use exactly one persistent workpad comment (`## Codex Workpad`) per issue.
 - If comment editing is unavailable in-session, use the update script. Only report blocked if both MCP editing and script-based editing are unavailable.
