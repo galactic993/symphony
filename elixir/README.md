@@ -98,6 +98,27 @@ make run-symphony-tmux
 
 or call `./scripts/run-symphony-tmux.sh` directly (`--attach` to auto-attach).
 
+### Auto-start on macOS (LaunchAgent)
+
+If you want Symphony to start automatically at login, point your LaunchAgent command to
+`./scripts/run-symphony-tmux.sh` (without `--attach`).
+
+Example `ProgramArguments` command:
+
+```bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"; \
+cd /Users/izutanikazuki/symphony-workspaces/symphony/elixir && \
+./scripts/run-symphony-tmux.sh
+```
+
+After editing `~/Library/LaunchAgents/local.symphony.tmux.plist`, reload it:
+
+```bash
+launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
+launchctl kickstart -k "gui/$(id -u)/local.symphony.tmux"
+```
+
 ## Configuration
 
 Pass a custom workflow file path to `./bin/symphony` when starting the service:
