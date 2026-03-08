@@ -11,6 +11,7 @@ SYMPHONY_CLOUDFLARED_ENABLED="${SYMPHONY_CLOUDFLARED_ENABLED:-1}"
 SYMPHONY_CLOUDFLARED_TUNNEL="${SYMPHONY_CLOUDFLARED_TUNNEL:-symphony-webhook}"
 SYMPHONY_CLOUDFLARED_LOG="${SYMPHONY_CLOUDFLARED_LOG:-/tmp/symphony-cloudflared.log}"
 SYMPHONY_CLOUDFLARED_WAIT_SECONDS="${SYMPHONY_CLOUDFLARED_WAIT_SECONDS:-20}"
+SYMPHONY_BIN_PATH="${ELIXIR_DIR}/bin/symphony"
 
 log() {
   echo "[run-symphony] $*"
@@ -67,10 +68,22 @@ ensure_cloudflared_tunnel_ready() {
   log "cloudflared tunnel ready: ${SYMPHONY_CLOUDFLARED_TUNNEL}"
 }
 
+skip_if_already_running() {
+  local running_pids
+  running_pids="$(pgrep -f "${SYMPHONY_BIN_PATH}" || true)"
+
+  if [ -n "${running_pids}" ]; then
+    log "symphony is already running (pid: ${running_pids//$'\n'/, }). skip duplicate startup."
+    exit 0
+  fi
+}
+
 if ! command -v dotenvx >/dev/null 2>&1; then
   echo "dotenvx is required. Install: brew install dotenvx/brew/dotenvx" >&2
   exit 1
 fi
+
+skip_if_already_running
 
 ensure_cloudflared_tunnel_ready
 
