@@ -266,6 +266,10 @@ resolve_team_id() {
   local response
   local team_id
 
+  ensure_linear_api_key
+  require_command curl
+  require_command jq
+
   variables_json="$(jq -nc --arg key "$team_key" '{key: $key}')"
   response="$(linear_graphql "$query" "$variables_json")"
   team_id="$(jq -r '.data.teams.nodes[0].id // empty' <<<"$response")"
@@ -279,7 +283,7 @@ resolve_team_id() {
 
 create_linear_project() {
   local project_name="$1"
-  local team_id
+  local team_id="${2:-}"
   local query
   local variables_json
   local response
@@ -295,7 +299,9 @@ create_linear_project() {
     error_exit "project name must not be empty"
   fi
 
-  team_id="$(resolve_team_id)"
+  if [[ -z "$team_id" ]]; then
+    team_id="$(resolve_team_id)"
+  fi
   query='mutation SymphonyCreateProject($name: String!, $teamId: String!) { projectCreate(input: { name: $name, teamIds: [$teamId] }) { success project { name slugId url } } }'
   variables_json="$(jq -nc --arg name "$project_name" --arg teamId "$team_id" '{name: $name, teamId: $teamId}')"
   response="$(linear_graphql "$query" "$variables_json")"
@@ -318,6 +324,58 @@ create_linear_project() {
 
   echo "Created Linear project: name=${project_name} slug=${slug} team=${LINEAR_TEAM_KEY:-MEZ}" >&2
   printf '%s\n' "$slug"
+}
+
+# Workflow states required by symphony workflow (name:type:color)
+SYMPHONY_WORKFLOW_STATES=(
+  "Human Review:started:#f2c94c"
+  "Rework:started:#e6e6e6"
+  "Merging:started:#5b8def"
+)
+
+ensure_team_workflow_states() {
+  local team_id="$1"
+  local query
+  local variables_json
+  local response
+  local existing_states
+  local state_name
+  local state_type
+  local state_color
+  local state_entry
+  local success
+
+  ensure_linear_api_key
+  require_command curl
+  require_command jq
+
+  # Fetch existing workflow states for the team
+  query='query SymphonyTeamWorkflowStates($teamId: String!) { team(id: $teamId) { states { nodes { name type } } } }'
+  variables_json="$(jq -nc --arg teamId "$team_id" '{teamId: $teamId}')"
+  response="$(linear_graphql "$query" "$variables_json")"
+  existing_states="$(jq -r '.data.team.states.nodes // [] | map(.name) | @json' <<<"$response")"
+
+  for state_entry in "${SYMPHONY_WORKFLOW_STATES[@]}"; do
+    IFS=':' read -r state_name state_type state_color <<< "$state_entry"
+
+    # Check if state already exists
+    if jq -e --arg name "$state_name" 'index($name) != null' <<<"$existing_states" >/dev/null 2>&1; then
+      echo "Workflow state '${state_name}' already exists in team" >&2
+      continue
+    fi
+
+    # Create the workflow state (use string type, not enum)
+    query='mutation SymphonyCreateWorkflowState($name: String!, $teamId: String!, $type: String!, $color: String!) { workflowStateCreate(input: { name: $name, teamId: $teamId, type: $type, color: $color }) { success workflowState { name type } } }'
+    variables_json="$(jq -nc --arg name "$state_name" --arg teamId "$team_id" --arg type "$state_type" --arg color "$state_color" '{name: $name, teamId: $teamId, type: $type, color: $color}')"
+    response="$(linear_graphql "$query" "$variables_json")"
+    success="$(jq -r '.data.workflowStateCreate.success // false' <<<"$response")"
+
+    if [[ "$success" != "true" ]]; then
+      error_exit "failed to create workflow state '${state_name}'"
+    else
+      echo "Created workflow state: ${state_name}" >&2
+    fi
+  done
 }
 
 resolve_elixir_dir() {
@@ -402,7 +460,9 @@ case "$command_name" in
     project_name="$2"
     validate_project_dir "$project_dir"
     project_dir="$(normalize_project_dir "$project_dir")"
-    slug="$(create_linear_project "$project_name")"
+    team_id="$(resolve_team_id)"
+    slug="$(create_linear_project "$project_name" "$team_id")"
+    ensure_team_workflow_states "$team_id"
     ;;
   *)
     usage

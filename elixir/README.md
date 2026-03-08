@@ -44,7 +44,8 @@ Symphony stops the active agent for that issue and cleans up matching workspaces
      now checks the ticket's team workflow at run start and creates those missing custom
      states through Linear GraphQL when the configured token has permission to edit team
      workflow settings. If your token cannot create workflow states, add them manually in
-     Team Settings → Workflow in Linear before running Symphony.
+     Team Settings → Workflow in Linear before running Symphony. For existing teams, you can
+     retrofit the required states with `bash elixir/ensure-workflow-states.sh MEZ`.
 6. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
