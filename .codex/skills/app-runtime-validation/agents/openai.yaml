@@ -1,0 +1,4 @@
+interface:
+  display_name: "App Runtime Validation"
+  short_description: "Drive browser QA and upload proof to Linear"
+  default_prompt: "Use $app-runtime-validation to launch the app, exercise the changed browser flow, and upload video evidence to the Linear issue."

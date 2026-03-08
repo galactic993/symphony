@@ -168,6 +168,7 @@ This workflow depends on exact Linear state names: `Todo`, `In Progress`, `Human
 ## Related skills
 
 - `linear`: interact with Linear.
+- `app-runtime-validation`: required browser walkthrough + evidence upload for app-touching changes.
 - `commit`: produce clean, logical commits during implementation.
 - `push`: keep remote branch current and publish updates.
 - `pull`: keep branch updated with latest `origin/main` before handoff.
@@ -177,6 +178,21 @@ Symphony-provided dynamic tools:
 
 - `linear_graphql`: raw Linear GraphQL access for issue state, comments, and attachments.
 - `linear_upload_issue_asset`: upload a local screenshot/video/log artifact to Linear and create an issue comment with the resulting asset URL.
+
+## App runtime validation (required)
+
+Use this whenever the ticket changes browser-visible or other app-touching runtime behavior.
+
+1. Open and follow `.codex/skills/app-runtime-validation/SKILL.md`.
+2. Launch the relevant local app and confirm readiness before any browser walkthrough.
+3. Exercise the changed flow in a real browser with recording enabled.
+4. Produce a fresh artifact for the current HEAD, preferably a walkthrough video.
+5. Upload at least one proof artifact to the Linear issue.
+   - Prefer `linear_upload_issue_asset`.
+   - If only `linear_graphql` is available, follow the documented upload flow and create/update the issue comment manually.
+6. Record the walked flow, local URL, artifact path, and resulting Linear URL in the workpad `Validation`/`Notes`.
+7. Do not waive this step for app-touching work just because tests passed.
+8. If blocked by missing env/auth/tooling, document the blocker and required human action instead of skipping validation.
 
 ## Status map
 
@@ -289,9 +305,8 @@ Use this only when completion is blocked by missing required tools or missing au
     - You may make temporary local proof edits to validate assumptions (for example: tweak a local build input for `make`, or hardcode a UI account / response path) when this increases confidence.
     - Revert every temporary proof edit before commit/push.
     - Document these temporary proof steps and outcomes in the workpad `Validation`/`Notes` sections so reviewers can follow the evidence.
-    - If app-touching, collect visual proof before handoff.
-    - Preferred when available: run `launch-app` validation and capture/upload media via `github-pr-media`.
-    - Required fallback when those helpers are unavailable: capture or reuse a local artifact (for example a Playwright video/screenshot/log), then upload it to the Linear issue with `linear_upload_issue_asset`.
+    - If app-touching, run `app-runtime-validation` on the latest code before any push or handoff.
+    - `launch-app` and `github-pr-media` are supporting helpers inside that flow; they do not replace the requirement to upload proof to Linear.
 6.  Re-check all acceptance criteria and close any gaps.
 7.  Before every `git push` attempt, run the required validation for your scope and confirm it passes; if it fails, address issues and rerun until green, then commit and push changes.
 8.  Attach PR URL to the issue (prefer attachment; use the workpad comment only if attachment is unavailable).
