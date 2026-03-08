@@ -895,6 +895,45 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert next_poll_in_ms <= 50
   end
 
+  test "request_refresh replaces a future scheduled poll with an immediate poll" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      poll_interval_ms: 5_000
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :WebhookRefreshOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state =
+      wait_for_state(pid, fn state ->
+        state.poll_check_in_progress == false and state.tick_queued == true and
+          is_integer(state.next_poll_due_at_ms) and
+          state.next_poll_due_at_ms > System.monotonic_time(:millisecond)
+      end)
+
+    assert initial_state.next_poll_due_at_ms > System.monotonic_time(:millisecond)
+
+    refresh = Orchestrator.request_refresh(orchestrator_name)
+
+    assert %{queued: true, coalesced: false, operations: ["poll", "reconcile"]} = refresh
+
+    refreshed_state = :sys.get_state(pid)
+
+    assert refreshed_state.tick_queued == true
+    assert is_reference(refreshed_state.tick_timer_ref)
+    assert is_integer(refreshed_state.next_poll_due_at_ms)
+    assert refreshed_state.next_poll_due_at_ms <= System.monotonic_time(:millisecond)
+
+    coalesced_refresh = Orchestrator.request_refresh(orchestrator_name)
+    assert %{queued: true, coalesced: true, operations: ["poll", "reconcile"]} = coalesced_refresh
+  end
+
   test "orchestrator restarts stalled workers with retry backoff" do
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
@@ -1579,6 +1618,26 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
   defp wait_for_snapshot(pid, predicate, timeout_ms \\ 200) when is_function(predicate, 1) do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
     do_wait_for_snapshot(pid, predicate, deadline_ms)
+  end
+
+  defp wait_for_state(pid, predicate, timeout_ms \\ 500) when is_function(predicate, 1) do
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+    do_wait_for_state(pid, predicate, deadline_ms)
+  end
+
+  defp do_wait_for_state(pid, predicate, deadline_ms) do
+    state = :sys.get_state(pid)
+
+    if predicate.(state) do
+      state
+    else
+      if System.monotonic_time(:millisecond) >= deadline_ms do
+        flunk("timed out waiting for orchestrator state: #{inspect(state)}")
+      else
+        Process.sleep(5)
+        do_wait_for_state(pid, predicate, deadline_ms)
+      end
+    end
   end
 
   defp do_wait_for_snapshot(pid, predicate, deadline_ms) do
