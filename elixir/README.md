@@ -65,7 +65,7 @@ mise exec -- mix build
 mise exec -- ./bin/symphony ./WORKFLOW.md
 ```
 
-### Run with `dotenvx` and no `.env` file
+### Run with `dotenvx` + Keychain + cloudflared
 
 Store `LINEAR_API_KEY` in macOS Keychain once, then start Symphony through `dotenvx`:
 
@@ -75,7 +75,28 @@ make linear-key
 make run-symphony
 ```
 
-This flow does not create a `.env` file in the repository.
+`./scripts/run-symphony.sh` does the following in one command:
+
+1. Starts `cloudflared tunnel run <name>` when needed (default tunnel name: `symphony-webhook`)
+2. Waits until the tunnel is ready
+3. Loads `LINEAR_API_KEY` (prefers exported env, falls back to macOS Keychain)
+4. Launches Symphony via `dotenvx run -- mise exec -- ./bin/symphony ./WORKFLOW.md`
+
+Useful environment variables:
+
+- `SYMPHONY_CLOUDFLARED_ENABLED` (`1` by default, set `0` to skip tunnel startup)
+- `SYMPHONY_CLOUDFLARED_TUNNEL` (`symphony-webhook` by default)
+- `SYMPHONY_CLOUDFLARED_LOG` (`/tmp/symphony-cloudflared.log` by default)
+- `SYMPHONY_CLOUDFLARED_WAIT_SECONDS` (`20` by default)
+
+For tmux-based boot/startup flows, use:
+
+```bash
+cd symphony/elixir
+make run-symphony-tmux
+```
+
+or call `./scripts/run-symphony-tmux.sh` directly (`--attach` to auto-attach).
 
 ## Configuration
 

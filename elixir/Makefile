@@ -1,9 +1,9 @@
-.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer linear-key run-symphony
+.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer linear-key run-symphony run-symphony-tmux
 
 MIX ?= mix
 
 help:
-	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci, linear-key, run-symphony"
+	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci, linear-key, run-symphony, run-symphony-tmux"
 
 setup:
 	$(MIX) setup
@@ -46,5 +46,8 @@ linear-key:
 
 run-symphony:
 	./scripts/run-symphony.sh
+
+run-symphony-tmux:
+	./scripts/run-symphony-tmux.sh --attach
 
 all: ci
