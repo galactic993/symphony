@@ -267,7 +267,7 @@ hooks:
   after_create: |
     git clone --depth 1 "$SOURCE_REPO_URL" .
 codex:
-  command: "$CODEX_BIN app-server --model gpt-5.3-codex"
+  command: "$CODEX_BIN app-server --model gpt-5.4"
 ```
 
 - If `WORKFLOW.md` is missing or has invalid YAML, startup and scheduling are halted until fixed.

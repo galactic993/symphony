@@ -12,6 +12,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
+  @tracker_fetch_retry_delay_ms 5_000
   @failure_state_name "Human Review"
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
@@ -32,6 +33,8 @@ defmodule SymphonyElixir.Orchestrator do
       :polling_enabled,
       :max_concurrent_agents,
       :next_poll_due_at_ms,
+      :tick_timer_id,
+      :tick_timer_ref,
       :poll_check_in_progress,
       :tick_queued,
       running: %{},
@@ -58,6 +61,8 @@ defmodule SymphonyElixir.Orchestrator do
       polling_enabled: Config.polling_enabled?(),
       max_concurrent_agents: Config.max_concurrent_agents(),
       next_poll_due_at_ms: now_ms,
+      tick_timer_id: nil,
+      tick_timer_ref: nil,
       poll_check_in_progress: false,
       tick_queued: true,
       codex_totals: @empty_codex_totals,
@@ -65,19 +70,20 @@ defmodule SymphonyElixir.Orchestrator do
     }
 
     run_terminal_workspace_cleanup()
-    :ok = schedule_tick(0)
+    state = schedule_tick(state, 0)
 
     {:ok, state}
   end
 
   @impl true
-  def handle_info(:tick, state) do
-    state = refresh_runtime_config(state)
-    state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil, tick_queued: false}
+  def handle_info({:tick, tick_id}, %{tick_timer_id: tick_id} = state) do
+    {:noreply, begin_poll_cycle(state)}
+  end
 
-    notify_dashboard()
-    :ok = schedule_poll_cycle_start()
-    {:noreply, state}
+  def handle_info({:tick, _stale_tick_id}, state), do: {:noreply, state}
+
+  def handle_info(:tick, state) do
+    {:noreply, begin_poll_cycle(state)}
   end
 
   def handle_info(:run_poll_cycle, state) do
@@ -88,11 +94,17 @@ defmodule SymphonyElixir.Orchestrator do
       if state.polling_enabled do
         now_ms = System.monotonic_time(:millisecond)
         next_poll_due_at_ms = now_ms + state.poll_interval_ms
-        :ok = schedule_tick(state.poll_interval_ms)
 
-        %{state | poll_check_in_progress: false, next_poll_due_at_ms: next_poll_due_at_ms, tick_queued: true}
+        state =
+          state
+          |> Map.put(:next_poll_due_at_ms, next_poll_due_at_ms)
+          |> Map.put(:poll_check_in_progress, false)
+          |> Map.put(:tick_queued, false)
+          |> schedule_tick(state.poll_interval_ms)
+
+        state
       else
-        %{state | poll_check_in_progress: false, next_poll_due_at_ms: nil, tick_queued: false}
+        finalize_non_polling_cycle(state)
       end
 
     notify_dashboard()
@@ -174,6 +186,21 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
+  defp finalize_non_polling_cycle(%State{tick_queued: true} = state) do
+    %{state | poll_check_in_progress: false}
+  end
+
+  defp finalize_non_polling_cycle(state) do
+    %{
+      state
+      | poll_check_in_progress: false,
+        next_poll_due_at_ms: nil,
+        tick_queued: false,
+        tick_timer_id: nil,
+        tick_timer_ref: nil
+    }
+  end
+
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
 
@@ -230,12 +257,30 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
+        maybe_schedule_tracker_fetch_retry(state, reason)
 
       false ->
         state
     end
   end
+
+  defp maybe_schedule_tracker_fetch_retry(%State{} = state, reason) do
+    if state.polling_enabled or state.tick_queued or !transient_tracker_fetch_error?(reason) do
+      state
+    else
+      Logger.warning("Scheduling tracker refresh retry in #{@tracker_fetch_retry_delay_ms}ms after transient fetch failure: #{inspect(reason)}")
+
+      schedule_tick(state, @tracker_fetch_retry_delay_ms)
+    end
+  end
+
+  defp transient_tracker_fetch_error?({:linear_api_request, _reason}), do: true
+
+  defp transient_tracker_fetch_error?({:linear_api_status, status})
+       when is_integer(status) and status >= 500,
+       do: true
+
+  defp transient_tracker_fetch_error?(_reason), do: false
 
   defp reconcile_running_issues(%State{} = state) do
     state = reconcile_stalled_running_issues(state)
@@ -1004,12 +1049,23 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_call(:request_refresh, _from, state) do
     now_ms = System.monotonic_time(:millisecond)
-    already_due? = is_integer(state.next_poll_due_at_ms) and state.next_poll_due_at_ms <= now_ms
-    coalesced = state.poll_check_in_progress == true or state.tick_queued == true or already_due?
 
-    unless coalesced do
-      :ok = schedule_tick(0)
-    end
+    immediate_tick_queued? =
+      state.tick_queued == true and is_integer(state.next_poll_due_at_ms) and
+        state.next_poll_due_at_ms <= now_ms
+
+    coalesced = state.poll_check_in_progress == true or immediate_tick_queued?
+
+    state =
+      if coalesced do
+        state
+      else
+        state
+        |> cancel_tick_timer()
+        |> Map.put(:next_poll_due_at_ms, now_ms)
+        |> Map.put(:tick_queued, false)
+        |> schedule_tick(0)
+      end
 
     {:reply,
      %{
@@ -1017,7 +1073,7 @@ defmodule SymphonyElixir.Orchestrator do
        coalesced: coalesced,
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
-     }, %{state | tick_queued: true}}
+     }, state}
   end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
@@ -1094,10 +1150,43 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp schedule_tick(delay_ms) do
-    :timer.send_after(delay_ms, self(), :tick)
-    :ok
+  defp begin_poll_cycle(state) do
+    state = refresh_runtime_config(state)
+
+    state = %{
+      state
+      | poll_check_in_progress: true,
+        next_poll_due_at_ms: nil,
+        tick_queued: false,
+        tick_timer_id: nil,
+        tick_timer_ref: nil
+    }
+
+    notify_dashboard()
+    :ok = schedule_poll_cycle_start()
+    state
   end
+
+  defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
+    tick_id = make_ref()
+    timer_ref = Process.send_after(self(), {:tick, tick_id}, delay_ms)
+    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
+
+    %{
+      state
+      | tick_timer_id: tick_id,
+        tick_timer_ref: timer_ref,
+        tick_queued: true,
+        next_poll_due_at_ms: due_at_ms
+    }
+  end
+
+  defp cancel_tick_timer(%State{tick_timer_ref: timer_ref} = state) when is_reference(timer_ref) do
+    _ = Process.cancel_timer(timer_ref)
+    %{state | tick_timer_id: nil, tick_timer_ref: nil}
+  end
+
+  defp cancel_tick_timer(%State{} = state), do: state
 
   defp schedule_poll_cycle_start do
     :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
