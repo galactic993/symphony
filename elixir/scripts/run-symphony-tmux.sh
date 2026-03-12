@@ -8,6 +8,8 @@ SESSION_NAME="${SYMPHONY_TMUX_SESSION:-symphony}"
 WINDOW_NAME="${SYMPHONY_TMUX_WINDOW:-runner}"
 RUN_COMMAND="${SYMPHONY_TMUX_RUN_COMMAND:-./scripts/run-symphony.sh}"
 ATTACH="${1:-}"
+LINEAR_KEYCHAIN_SERVICE="${SYMPHONY_LINEAR_KEYCHAIN_SERVICE:-symphony.linear.api_key}"
+LINEAR_KEYCHAIN_ACCOUNT="${SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT:-${USER:-$(id -un)}}"
 
 if ! command -v tmux >/dev/null 2>&1; then
   echo "tmux is required. Install: brew install tmux" >&2
@@ -15,6 +17,14 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 start_command="cd $(printf '%q' "${ELIXIR_DIR}") && ${RUN_COMMAND}"
+
+if [ -z "${LINEAR_API_KEY:-}" ]; then
+  LINEAR_API_KEY="$(security find-generic-password -s "${LINEAR_KEYCHAIN_SERVICE}" -a "${LINEAR_KEYCHAIN_ACCOUNT}" -w 2>/dev/null || true)"
+fi
+
+if [ -n "${LINEAR_API_KEY:-}" ]; then
+  tmux set-environment -g LINEAR_API_KEY "${LINEAR_API_KEY}"
+fi
 
 if ! tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
   tmux new-session -d -s "${SESSION_NAME}" -n "${WINDOW_NAME}" "${start_command}"
