@@ -19,8 +19,11 @@ This directory contains the Elixir agent orchestration service that polls Linear
   the environment.
 - `scripts/run-symphony.sh` owns the actual Symphony boot flow: cloudflared readiness,
   `dotenvx` re-exec, and `mise exec` launch.
+- LaunchAgent boot is expected to work without pre-exporting `LINEAR_API_KEY` in launchd as long as
+  repo-local `.env` and `.env.keys` are present for dotenvx.
 - Useful checks:
   - `launchctl print gui/$(id -u)/local.symphony.tmux`
+  - `launchctl kickstart -k gui/$(id -u)/local.symphony.tmux`
   - `tmux attach -t symphony`
   - `tail -f ~/Library/Logs/local.symphony.tmux.log`
   - `tail -f ~/Library/Logs/local.symphony.tmux.err.log`

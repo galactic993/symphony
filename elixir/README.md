@@ -120,7 +120,9 @@ Default startup chain:
 4. `run-symphony.sh` starts cloudflared if needed, then re-execs through `dotenvx` and launches
    Symphony
 
-Before relying on auto-start, save the Linear token into the local dotenvx-managed `.env` once:
+Before relying on auto-start, save the Linear token into the local dotenvx-managed `.env` once.
+The launchd shell itself does not need `LINEAR_API_KEY` pre-exported as long as `dotenvx` can read
+the repo-local `.env` and `.env.keys` pair:
 
 ```bash
 cd symphony/elixir
@@ -150,6 +152,14 @@ After editing `~/Library/LaunchAgents/local.symphony.tmux.plist`, reload it:
 launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
 launchctl kickstart -k "gui/$(id -u)/local.symphony.tmux"
+```
+
+To smoke-test the exact LaunchAgent path without logging out:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/local.symphony.tmux"
+launchctl print "gui/$(id -u)/local.symphony.tmux"
+tmux attach -t symphony
 ```
 
 Useful runtime checks:
