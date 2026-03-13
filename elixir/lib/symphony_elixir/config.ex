@@ -45,7 +45,7 @@ defmodule SymphonyElixir.Config do
   @default_polling_enabled true
   @default_linear_webhook_enabled false
   @default_workspace_root Path.join(System.tmp_dir!(), "symphony_workspaces")
-  @default_project_workspace_root Path.expand("~/symphony-workspace")
+  @default_project_workspace_root Path.expand("~/symphony-workspaces")
   @default_hook_timeout_ms 60_000
   @default_max_concurrent_agents 10
   @default_agent_max_turns 20

@@ -696,6 +696,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Config.linear_webhook_enabled?()
     assert Config.linear_webhook_secret() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
+    assert Config.project_workspace_root() == Path.expand("~/symphony-workspaces")
     assert Config.max_concurrent_agents() == 10
     assert Config.codex_command() == "codex app-server"
 
@@ -779,6 +780,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Config.linear_webhook_enabled?()
     assert Config.linear_webhook_secret() == nil
     assert Config.workspace_root() == Path.join(System.tmp_dir!(), "symphony_workspaces")
+    assert Config.project_workspace_root() == Path.expand("~/symphony-workspaces")
     assert Config.max_retry_backoff_ms() == 300_000
     assert Config.max_concurrent_agents_for_state("Todo") == 1
     assert Config.max_concurrent_agents_for_state("Review") == 10
