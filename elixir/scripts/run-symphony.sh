@@ -71,7 +71,11 @@ reexec_with_dotenvx_if_possible() {
     [[ -f "$file_path" ]] && dotenv_args+=(-fk "$file_path")
   done
 
-  exec dotenvx run "${dotenv_args[@]}" -- bash "$0" "${ORIGINAL_ARGS[@]}"
+  if [ "${#ORIGINAL_ARGS[@]}" -gt 0 ]; then
+    exec dotenvx run "${dotenv_args[@]}" -- bash "$0" "${ORIGINAL_ARGS[@]}"
+  fi
+
+  exec dotenvx run "${dotenv_args[@]}" -- bash "$0"
 }
 
 ensure_cloudflared_tunnel_ready() {
