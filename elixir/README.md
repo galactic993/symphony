@@ -108,15 +108,39 @@ or call `./scripts/run-symphony-tmux.sh` directly (`--attach` to auto-attach).
 
 ### Auto-start on macOS (LaunchAgent)
 
-If you want Symphony to start automatically at login, point your LaunchAgent command to
-`./scripts/run-symphony-tmux.sh` (without `--attach`).
+If you want Symphony to start automatically at login and keep a launchd job running, point your
+LaunchAgent command to `./scripts/run-symphony-launch-agent.sh` (without `--attach`).
+That wrapper keeps watching the tmux session and recreates it if the session disappears.
+
+Default startup chain:
+
+1. `launchd` starts `./scripts/run-symphony-launch-agent.sh`
+2. `run-symphony-launch-agent.sh` ensures tmux session `symphony` exists
+3. `run-symphony-tmux.sh` injects `LINEAR_API_KEY` into tmux from the environment or macOS Keychain
+4. `run-symphony.sh` starts cloudflared if needed, loads `LINEAR_API_KEY`, and launches Symphony
+
+Before relying on auto-start, save the Linear token into Keychain once:
+
+```bash
+cd symphony/elixir
+make linear-key
+```
 
 Example `ProgramArguments` command:
 
 ```bash
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"; \
 cd /Users/izutanikazuki/symphony-workspaces/symphony/elixir && \
-./scripts/run-symphony-tmux.sh
+./scripts/run-symphony-launch-agent.sh
+```
+
+Recommended `~/Library/LaunchAgents/local.symphony.tmux.plist` keys:
+
+```xml
+<key>KeepAlive</key>
+<true/>
+<key>RunAtLoad</key>
+<true/>
 ```
 
 After editing `~/Library/LaunchAgents/local.symphony.tmux.plist`, reload it:
@@ -125,6 +149,16 @@ After editing `~/Library/LaunchAgents/local.symphony.tmux.plist`, reload it:
 launchctl bootout "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.symphony.tmux.plist
 launchctl kickstart -k "gui/$(id -u)/local.symphony.tmux"
+```
+
+Useful runtime checks:
+
+```bash
+launchctl print "gui/$(id -u)/local.symphony.tmux"
+tmux ls
+tmux attach -t symphony
+tail -f ~/Library/Logs/local.symphony.tmux.log
+tail -f ~/Library/Logs/local.symphony.tmux.err.log
 ```
 
 ## Configuration

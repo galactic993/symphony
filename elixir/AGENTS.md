@@ -8,6 +8,22 @@ This directory contains the Elixir agent orchestration service that polls Linear
 - Install deps: `mix setup`.
 - Main quality gate: `make all` (format check, lint, coverage, dialyzer).
 
+## Local Runtime Ops
+
+- macOS auto-start uses `~/Library/LaunchAgents/local.symphony.tmux.plist`.
+- Point that LaunchAgent to `scripts/run-symphony-launch-agent.sh`, not directly to
+  `run-symphony-tmux.sh`, so launchd stays resident and recreates the tmux session when needed.
+- Standard tmux session name for the local Symphony service is `symphony`.
+- `scripts/run-symphony-tmux.sh` pushes `LINEAR_API_KEY` into tmux from the environment or macOS
+  Keychain before starting the runner pane.
+- `scripts/run-symphony.sh` owns the actual Symphony boot flow: cloudflared readiness,
+  `LINEAR_API_KEY` resolution, and `dotenvx` + `mise exec` launch.
+- Useful checks:
+  - `launchctl print gui/$(id -u)/local.symphony.tmux`
+  - `tmux attach -t symphony`
+  - `tail -f ~/Library/Logs/local.symphony.tmux.log`
+  - `tail -f ~/Library/Logs/local.symphony.tmux.err.log`
+
 
 ## Codebase-Specific Conventions
 
