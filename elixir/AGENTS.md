@@ -15,12 +15,20 @@ This directory contains the Elixir agent orchestration service that polls Linear
   `run-symphony-tmux.sh`, so launchd stays resident and recreates the tmux session when needed.
 - Standard tmux session name for the local Symphony service is `symphony`.
 - Keep `LINEAR_API_KEY` in dotenvx-managed env files for this repo, not macOS Keychain.
+- Initialize or rotate that token with `cd elixir && make linear-env`.
+- Verify `elixir/.env` and `elixir/.env.keys` exist before assuming LaunchAgent startup can work.
 - `scripts/run-symphony-tmux.sh` forwards `LINEAR_API_KEY` into tmux when it is already present in
   the environment.
 - `scripts/run-symphony.sh` owns the actual Symphony boot flow: cloudflared readiness,
   `dotenvx` re-exec, and `mise exec` launch.
 - LaunchAgent boot is expected to work without pre-exporting `LINEAR_API_KEY` in launchd as long as
   repo-local `.env` and `.env.keys` are present for dotenvx.
+- `scripts/run-symphony.sh` will fail fast if `LINEAR_API_KEY` cannot be resolved from the current
+  environment or dotenvx-managed env files.
+- For smoke tests after setup changes, use:
+  - `cd elixir && ./scripts/run-symphony-tmux.sh`
+  - `tmux capture-pane -pt symphony:runner`
+  - `curl -I http://127.0.0.1:5923/`
 - Useful checks:
   - `launchctl print gui/$(id -u)/local.symphony.tmux`
   - `launchctl kickstart -k gui/$(id -u)/local.symphony.tmux`

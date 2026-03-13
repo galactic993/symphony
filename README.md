@@ -34,6 +34,11 @@ help with the setup:
 > Set up Symphony for my repository based on
 > https://github.com/openai/symphony/blob/main/elixir/README.md
 
+When using the Elixir implementation locally, save `LINEAR_API_KEY` once with
+`cd elixir && make linear-env`. That stores the token in repo-local dotenvx-managed env files so
+manual startup, tmux startup, and macOS LaunchAgent startup can all load the same credential
+without depending on a shell-exported environment variable.
+
 For retry/backoff execution semantics in the Elixir runtime, see the FAQ entry
 "What happens when an issue enters the Backoff queue?" in [`elixir/README.md`](elixir/README.md).
 
