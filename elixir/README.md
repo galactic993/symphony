@@ -87,7 +87,8 @@ make run-symphony
 
 1. Starts `cloudflared tunnel run <name>` when needed (default tunnel name: `symphony-webhook`)
 2. Waits until the tunnel is ready
-3. Loads `LINEAR_API_KEY` (prefers exported env, falls back to macOS Keychain)
+3. Loads `LINEAR_API_KEY` (prefers exported env, falls back to macOS Keychain, then retries via
+   `dotenvx` using local `.env*` files such as `.env.local`)
 4. Launches Symphony via `dotenvx run -- mise exec -- ./bin/symphony ./WORKFLOW.md`
 
 Useful environment variables:

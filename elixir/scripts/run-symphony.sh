@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ORIGINAL_ARGS=("$@")
+DOTENVX_REEXEC_FLAG="${SYMPHONY_RUN_SYMPHONY_DOTENVX_REEXEC:-0}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ELIXIR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ELIXIR_DIR}"
@@ -15,6 +18,62 @@ SYMPHONY_BIN_PATH="${ELIXIR_DIR}/bin/symphony"
 
 log() {
   echo "[run-symphony] $*"
+}
+
+reexec_with_dotenvx_if_possible() {
+  local script_dir
+  local repo_root
+  local -a candidate_dirs
+  local -a dotenv_args
+  local candidate
+  local file_path
+
+  if [[ -n "${LINEAR_API_KEY:-}" ]]; then
+    return 0
+  fi
+
+  if [[ "$DOTENVX_REEXEC_FLAG" == "1" ]]; then
+    return 0
+  fi
+
+  if ! command -v dotenvx >/dev/null 2>&1; then
+    return 0
+  fi
+
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "${script_dir}/.." && pwd)"
+  candidate_dirs=("$PWD")
+
+  if [[ "$script_dir" != "$PWD" ]]; then
+    candidate_dirs+=("$script_dir")
+  fi
+
+  if [[ "$repo_root" != "$PWD" && "$repo_root" != "$script_dir" ]]; then
+    candidate_dirs+=("$repo_root")
+  fi
+
+  dotenv_args=(-e "SYMPHONY_RUN_SYMPHONY_DOTENVX_REEXEC=1")
+  for candidate in "${candidate_dirs[@]}"; do
+    file_path="${candidate}/.env"
+    [[ -f "$file_path" ]] && dotenv_args+=(-f "$file_path")
+
+    file_path="${candidate}/.env.local"
+    [[ -f "$file_path" ]] && dotenv_args+=(-f "$file_path")
+
+    file_path="${candidate}/.env.development"
+    [[ -f "$file_path" ]] && dotenv_args+=(-f "$file_path")
+
+    file_path="${candidate}/.env.production"
+    [[ -f "$file_path" ]] && dotenv_args+=(-f "$file_path")
+
+    file_path="${candidate}/.env.vault"
+    [[ -f "$file_path" ]] && dotenv_args+=(-fv "$file_path")
+
+    file_path="${candidate}/.env.keys"
+    [[ -f "$file_path" ]] && dotenv_args+=(-fk "$file_path")
+  done
+
+  exec dotenvx run "${dotenv_args[@]}" -- bash "$0" "${ORIGINAL_ARGS[@]}"
 }
 
 ensure_cloudflared_tunnel_ready() {
@@ -91,6 +150,8 @@ LINEAR_API_KEY="${LINEAR_API_KEY:-}"
 if [ -z "${LINEAR_API_KEY}" ]; then
   LINEAR_API_KEY="$(security find-generic-password -s "${SERVICE_NAME}" -a "${ACCOUNT_NAME}" -w 2>/dev/null || true)"
 fi
+
+reexec_with_dotenvx_if_possible
 
 if [ -z "${LINEAR_API_KEY}" ]; then
   echo "LINEAR_API_KEY is not set and was not found in Keychain." >&2
