@@ -29,25 +29,6 @@ require_command() {
   command -v "$command_name" >/dev/null 2>&1 || error_exit "required command not found: $command_name"
 }
 
-load_linear_api_key_from_keychain() {
-  local service_name="${SYMPHONY_LINEAR_KEYCHAIN_SERVICE:-symphony.linear.api_key}"
-  local account_name="${SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT:-$USER}"
-  local keychain_value
-
-  if ! command -v security >/dev/null 2>&1; then
-    return 1
-  fi
-
-  keychain_value="$(security find-generic-password -s "$service_name" -a "$account_name" -w 2>/dev/null || true)"
-  if [[ -z "$keychain_value" ]]; then
-    return 1
-  fi
-
-  LINEAR_API_KEY="$keychain_value"
-  export LINEAR_API_KEY
-  return 0
-}
-
 reexec_with_dotenvx_if_possible() {
   local script_dir
   local repo_root
@@ -105,15 +86,14 @@ reexec_with_dotenvx_if_possible() {
 }
 
 ensure_linear_api_key() {
-  load_linear_api_key_from_keychain || true
   reexec_with_dotenvx_if_possible
 
   if [[ -z "${LINEAR_API_KEY:-}" ]]; then
     if command -v dotenvx >/dev/null 2>&1; then
-      error_exit 'LINEAR_API_KEY is required (or run with `dotenvx run -- ...`, or set keychain via `make linear-key`)'
+      error_exit 'LINEAR_API_KEY is required (or set it with `make linear-env`, or run with `dotenvx run -- ...`)'
     fi
 
-    error_exit 'LINEAR_API_KEY is required (or set keychain via `make linear-key`)'
+    error_exit 'LINEAR_API_KEY is required (or set it with `make linear-env`)'
   fi
 }
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME="${SYMPHONY_LINEAR_KEYCHAIN_SERVICE:-symphony.linear.api_key}"
-ACCOUNT_NAME="${SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT:-$USER}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ELIXIR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE_PATH="${ELIXIR_DIR}/.env"
+ENV_KEYS_FILE_PATH="${ELIXIR_DIR}/.env.keys"
 
 printf "Enter LINEAR_API_KEY (input hidden): "
 stty -echo
@@ -15,9 +17,15 @@ if [ -z "${LINEAR_API_KEY}" ]; then
   exit 1
 fi
 
-# Replace existing secret for this service/account pair.
-security delete-generic-password -s "$SERVICE_NAME" -a "$ACCOUNT_NAME" >/dev/null 2>&1 || true
-security add-generic-password -U -s "$SERVICE_NAME" -a "$ACCOUNT_NAME" -w "$LINEAR_API_KEY" >/dev/null
+if ! command -v dotenvx >/dev/null 2>&1; then
+  echo "dotenvx is required. Install: brew install dotenvx/brew/dotenvx" >&2
+  exit 1
+fi
 
-echo "Saved LINEAR_API_KEY to macOS Keychain."
-echo "service=$SERVICE_NAME account=$ACCOUNT_NAME"
+dotenvx set LINEAR_API_KEY "${LINEAR_API_KEY}" \
+  -f "${ENV_FILE_PATH}" \
+  -fk "${ENV_KEYS_FILE_PATH}" \
+  >/dev/null
+
+echo "Saved LINEAR_API_KEY to ${ENV_FILE_PATH} using dotenvx encryption."
+echo "Symphony will load it through dotenvx."

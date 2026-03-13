@@ -8,8 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ELIXIR_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ELIXIR_DIR}"
 
-SERVICE_NAME="${SYMPHONY_LINEAR_KEYCHAIN_SERVICE:-symphony.linear.api_key}"
-ACCOUNT_NAME="${SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT:-$USER}"
 SYMPHONY_CLOUDFLARED_ENABLED="${SYMPHONY_CLOUDFLARED_ENABLED:-1}"
 SYMPHONY_CLOUDFLARED_TUNNEL="${SYMPHONY_CLOUDFLARED_TUNNEL:-symphony-webhook}"
 SYMPHONY_CLOUDFLARED_LOG="${SYMPHONY_CLOUDFLARED_LOG:-/tmp/symphony-cloudflared.log}"
@@ -147,14 +145,12 @@ skip_if_already_running
 ensure_cloudflared_tunnel_ready
 
 LINEAR_API_KEY="${LINEAR_API_KEY:-}"
-if [ -z "${LINEAR_API_KEY}" ]; then
-  LINEAR_API_KEY="$(security find-generic-password -s "${SERVICE_NAME}" -a "${ACCOUNT_NAME}" -w 2>/dev/null || true)"
-fi
 
 reexec_with_dotenvx_if_possible
 
 if [ -z "${LINEAR_API_KEY}" ]; then
-  echo "LINEAR_API_KEY is not set and was not found in Keychain." >&2
+  echo "LINEAR_API_KEY is not set." >&2
+  echo "Set it in the current shell or via dotenvx-managed env files such as .env." >&2
   echo "Run: ./scripts/set-linear-api-key.sh" >&2
   exit 1
 fi

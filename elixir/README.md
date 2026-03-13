@@ -73,13 +73,13 @@ mise exec -- ./bin/symphony ./WORKFLOW.md
 `coverage`, `dialyzer`). Use the run commands above for local startup; use `make all`
 when you want the full validation pass.
 
-### Run with `dotenvx` + Keychain + cloudflared
+### Run with `dotenvx` + cloudflared
 
-Store `LINEAR_API_KEY` in macOS Keychain once, then start Symphony through `dotenvx`:
+Store `LINEAR_API_KEY` in the repo's dotenvx-managed `.env` once, then start Symphony:
 
 ```bash
 cd symphony/elixir
-make linear-key
+make linear-env
 make run-symphony
 ```
 
@@ -87,8 +87,7 @@ make run-symphony
 
 1. Starts `cloudflared tunnel run <name>` when needed (default tunnel name: `symphony-webhook`)
 2. Waits until the tunnel is ready
-3. Loads `LINEAR_API_KEY` (prefers exported env, falls back to macOS Keychain, then retries via
-   `dotenvx` using local `.env*` files such as `.env.local`)
+3. Loads `LINEAR_API_KEY` (prefers exported env, then retries via `dotenvx` using `.env*` files)
 4. Launches Symphony via `dotenvx run -- mise exec -- ./bin/symphony ./WORKFLOW.md`
 
 Useful environment variables:
@@ -117,14 +116,15 @@ Default startup chain:
 
 1. `launchd` starts `./scripts/run-symphony-launch-agent.sh`
 2. `run-symphony-launch-agent.sh` ensures tmux session `symphony` exists
-3. `run-symphony-tmux.sh` injects `LINEAR_API_KEY` into tmux from the environment or macOS Keychain
-4. `run-symphony.sh` starts cloudflared if needed, loads `LINEAR_API_KEY`, and launches Symphony
+3. `run-symphony-tmux.sh` forwards `LINEAR_API_KEY` when it is already present in the environment
+4. `run-symphony.sh` starts cloudflared if needed, then re-execs through `dotenvx` and launches
+   Symphony
 
-Before relying on auto-start, save the Linear token into Keychain once:
+Before relying on auto-start, save the Linear token into the local dotenvx-managed `.env` once:
 
 ```bash
 cd symphony/elixir
-make linear-key
+make linear-env
 ```
 
 Example `ProgramArguments` command:
@@ -260,10 +260,8 @@ When using `add-project.sh`, relative `dir` values (such as `.`, `./foo`, `../ba
 normalized and saved as absolute paths from the current working directory.
 
 `new` requires `LINEAR_API_KEY`, `curl`, and `jq`. Team key can be overridden with `LINEAR_TEAM_KEY`.
-If `LINEAR_API_KEY` is not exported, the script checks macOS Keychain using
-`SYMPHONY_LINEAR_KEYCHAIN_SERVICE` / `SYMPHONY_LINEAR_KEYCHAIN_ACCOUNT` (same defaults as `make run-symphony`),
-and also attempts one `dotenvx run` re-exec that searches `.env*` in the current directory,
-script directory, and repo root.
+If `LINEAR_API_KEY` is not exported, the script attempts one `dotenvx run` re-exec that searches
+`.env*` in the current directory, script directory, and repo root.
 
 Notes:
 

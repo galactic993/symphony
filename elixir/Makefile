@@ -1,9 +1,9 @@
-.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer linear-key run-symphony run-symphony-tmux
+.PHONY: help all setup deps build fmt fmt-check lint test coverage ci dialyzer linear-env linear-key run-symphony run-symphony-tmux
 
 MIX ?= mix
 
 help:
-	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci, linear-key, run-symphony, run-symphony-tmux"
+	@echo "Targets: setup, deps, fmt, fmt-check, lint, test, coverage, dialyzer, ci, linear-env, run-symphony, run-symphony-tmux"
 
 setup:
 	$(MIX) setup
@@ -41,7 +41,11 @@ ci:
 	$(MAKE) coverage
 	$(MAKE) dialyzer
 
+linear-env:
+	./scripts/set-linear-api-key.sh
+
 linear-key:
+	@echo "linear-key is deprecated; use make linear-env" >&2
 	./scripts/set-linear-api-key.sh
 
 run-symphony:
