@@ -978,6 +978,57 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert %{queued: true, coalesced: true, operations: ["poll", "reconcile"]} = coalesced_refresh
   end
 
+  test "request_refresh during an active poll queues a follow-up refresh when polling is disabled" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: nil,
+      polling_enabled: false
+    )
+
+    orchestrator_name = Module.concat(__MODULE__, :InFlightRefreshOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+
+    in_flight_state =
+      initial_state
+      |> Map.put(:poll_check_in_progress, true)
+      |> Map.put(:tick_queued, false)
+      |> Map.put(:tick_timer_id, nil)
+      |> Map.put(:tick_timer_ref, nil)
+      |> Map.put(:next_poll_due_at_ms, nil)
+
+    :sys.replace_state(pid, fn _ -> in_flight_state end)
+
+    refresh = Orchestrator.request_refresh(orchestrator_name)
+
+    assert %{queued: true, coalesced: true, operations: ["poll", "reconcile"]} = refresh
+
+    refreshed_state = :sys.get_state(pid)
+
+    assert refreshed_state.poll_check_in_progress == true
+    assert refreshed_state.tick_queued == true
+    assert is_integer(refreshed_state.next_poll_due_at_ms)
+    assert refreshed_state.next_poll_due_at_ms <= System.monotonic_time(:millisecond)
+
+    send(pid, :run_poll_cycle)
+
+    follow_up_state =
+      wait_for_state(pid, fn state ->
+        state.poll_check_in_progress == false and state.tick_queued == true and
+          is_reference(state.tick_timer_ref) and
+          is_integer(state.next_poll_due_at_ms) and
+          state.next_poll_due_at_ms <= System.monotonic_time(:millisecond)
+      end)
+
+    assert follow_up_state.tick_queued == true
+  end
+
   test "orchestrator retries transient tracker fetch failures even when polling is disabled" do
     Application.put_env(:symphony_elixir, :linear_client_module, FakeLinearClient)
 

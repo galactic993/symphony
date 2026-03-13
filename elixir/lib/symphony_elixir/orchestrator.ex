@@ -89,28 +89,37 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
+    now_ms = System.monotonic_time(:millisecond)
 
     state =
-      if state.polling_enabled do
-        now_ms = System.monotonic_time(:millisecond)
-        next_poll_due_at_ms = now_ms + state.poll_interval_ms
+      cond do
+        refresh_pending?(state, now_ms) ->
+          state
+          |> Map.put(:poll_check_in_progress, false)
+          |> Map.put(:tick_queued, false)
+          |> schedule_tick(0)
 
-        state =
+        state.tick_queued == true ->
+          Map.put(state, :poll_check_in_progress, false)
+
+        state.polling_enabled ->
+          next_poll_due_at_ms = now_ms + state.poll_interval_ms
+
           state
           |> Map.put(:next_poll_due_at_ms, next_poll_due_at_ms)
           |> Map.put(:poll_check_in_progress, false)
           |> Map.put(:tick_queued, false)
           |> schedule_tick(state.poll_interval_ms)
 
-        state
-      else
-        finalize_non_polling_cycle(state)
+        true ->
+          finalize_non_polling_cycle(state)
       end
 
     notify_dashboard()
     {:noreply, state}
   end
 
+  @impl true
   def handle_info(
         {:DOWN, ref, :process, _pid, reason},
         %{running: running} = state
@@ -147,6 +156,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @impl true
   def handle_info(
         {:codex_worker_update, issue_id, %{event: _, timestamp: _} = update},
         %{running: running} = state
@@ -1054,17 +1064,25 @@ defmodule SymphonyElixir.Orchestrator do
       state.tick_queued == true and is_integer(state.next_poll_due_at_ms) and
         state.next_poll_due_at_ms <= now_ms
 
-    coalesced = state.poll_check_in_progress == true or immediate_tick_queued?
+    poll_in_progress? = state.poll_check_in_progress == true
+    coalesced = immediate_tick_queued? or poll_in_progress?
 
     state =
-      if coalesced do
-        state
-      else
-        state
-        |> cancel_tick_timer()
-        |> Map.put(:next_poll_due_at_ms, now_ms)
-        |> Map.put(:tick_queued, false)
-        |> schedule_tick(0)
+      cond do
+        poll_in_progress? ->
+          state
+          |> Map.put(:tick_queued, true)
+          |> Map.put(:next_poll_due_at_ms, now_ms)
+
+        coalesced ->
+          state
+
+        true ->
+          state
+          |> cancel_tick_timer()
+          |> Map.put(:next_poll_due_at_ms, now_ms)
+          |> Map.put(:tick_queued, false)
+          |> schedule_tick(0)
       end
 
     {:reply,
@@ -1192,6 +1210,13 @@ defmodule SymphonyElixir.Orchestrator do
     :timer.send_after(@poll_transition_render_delay_ms, self(), :run_poll_cycle)
     :ok
   end
+
+  defp refresh_pending?(%State{tick_queued: true, next_poll_due_at_ms: due_at_ms}, now_ms)
+       when is_integer(due_at_ms) and is_integer(now_ms) do
+    due_at_ms <= now_ms
+  end
+
+  defp refresh_pending?(_state, _now_ms), do: false
 
   defp next_poll_in_ms(nil, _now_ms), do: nil
 
